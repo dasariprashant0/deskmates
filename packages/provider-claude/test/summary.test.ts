@@ -32,7 +32,7 @@ describe('summarize', () => {
   })
   test('after-colon part never exceeds 40 chars', () => {
     expect(summarize('Read', { file_path: '/a/' + 'f'.repeat(100) }).split(': ')[1]!.length).toBeLessThanOrEqual(40)
-    expect(summarize('Bash', { command: 'c'.repeat(100) }).split(': ')[1]!.length).toBeLessThanOrEqual(40)
+    expect(summarize('Bash', { command: 'c'.repeat(100) })).toBe('Bash')
   })
 })
 
@@ -57,7 +57,7 @@ describe('hardening', () => {
     expect(summarize('Bash', { command: 'API_KEY=sk-FAKE-000 curl x' })).toBe('Bash: curl')
     expect(summarize('Bash', { command: 'A=1 B=2 /usr/bin/make all' })).toBe('Bash: make')
     expect(summarize('Bash', { command: 'API_KEY=sk-FAKE-000' })).toBe('Bash')
-    expect(summarize('Bash', { command: 'A="sk-FAKE 000" curl' })).toBe('Bash: curl')
+    expect(summarize('Bash', { command: 'A="sk-FAKE 000" curl' })).toBe('Bash')
     expect(summarize('Bash', { command: '/Users/x/secret/run.sh --go' })).toBe('Bash: run.sh')
     expect(summarize('Bash', { command: '/' })).toBe('Bash')
   })
@@ -68,5 +68,41 @@ describe('hardening', () => {
   test('no secret or path leaks in any Bash label', () => {
     const l = summarize('Bash', { command: 'API_KEY=sk-FAKE-000 /Users/x/secret/run.sh' })
     expect(l).not.toMatch(/sk-FAKE|Users|secret/)
+  })
+})
+
+describe('Bash allowlist', () => {
+  const cases: [string, string][] = [
+    ['--token=abc cmd', 'Bash'],
+    ['"FOO=bar" cmd', 'Bash'],
+    ['FOO=a\\ b cmd', 'Bash'],
+    ["FOO=$'a b' cmd", 'Bash'],
+    ['KEY=$(cat s) cmd', 'Bash'],
+    ['--url=https://x/SECRET', 'Bash'],
+    ['env FOO=bar cmd', 'Bash: env'],
+    ['./relative/tool', 'Bash: tool'],
+    ['~/bin/x', 'Bash: x'],
+    ['$(cmd)', 'Bash'],
+    ['`cmd`', 'Bash'],
+    ['a;b', 'Bash'],
+    ['--flag', 'Bash'],
+    ['', 'Bash'],
+    ['   ', 'Bash'],
+    ['x'.repeat(500), 'Bash'],
+    ['caf\u00e9 arg', 'Bash'],
+    ['sudo rm -rf x', 'Bash: sudo'],
+    ['g++ a.cc', 'Bash: g++'],
+    ['FOO=bar BAZ=1 ls', 'Bash: ls'],
+  ]
+  test.each(cases)('%j -> %s', (command, expected) => {
+    expect(summarize('Bash', { command })).toBe(expected)
+  })
+})
+
+describe('code-point-aware truncation', () => {
+  test('does not split a surrogate pair at the cut', () => {
+    const l = summarize('Grep', { pattern: 'a'.repeat(23) + '\u{1F600}tail' })
+    expect(l).toBe('Grep: ' + 'a'.repeat(23) + '\u{1F600}')
+    expect(l).not.toMatch(/[\ud800-\udbff](?![\udc00-\udfff])/)
   })
 })
