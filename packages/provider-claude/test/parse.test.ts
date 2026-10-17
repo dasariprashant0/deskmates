@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, test } from 'vitest'
 import { newParseCtx, parseLine, type SourceRef } from '../src/index'
 
+const KINDS = ['session.start', 'activity', 'tool.start', 'tool.end', 'usage', 'message']
 const src: SourceRef = { provider: 'claude', filePath: '/x/s1.jsonl', sessionId: 's1', isSubagent: false }
 const agent = { provider: 'claude', sessionId: 's1', agentId: undefined }
 const lines = readFileSync(new URL('./fixtures/exchange.jsonl', import.meta.url), 'utf8').split('\n').filter(Boolean)
@@ -73,7 +74,9 @@ describe('parseLine robustness', () => {
       const at = Math.floor(rnd() * base.length)
       const ch = String.fromCharCode(32 + Math.floor(rnd() * 95))
       const m = rnd() < 0.5 ? base.slice(0, at) + base.slice(at + 1) : base.slice(0, at) + ch + base.slice(at + 1)
-      expect(() => p(m)).not.toThrow()
+      const r = p(m)
+      expect(Array.isArray(r)).toBe(true)
+      for (const ev of r) expect(KINDS).toContain(ev.kind)
     }
   })
 })
