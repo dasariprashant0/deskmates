@@ -28,7 +28,8 @@ describe('discover', () => {
       ['s1', 'ab12', true], ['s2', undefined, false], ['s1', undefined, false]])
     expect(r[0]).toMatchObject({ provider: 'claude', filePath: join(root, 'p1', 's1', 'subagents', 'agent-ab12.jsonl') })
   })
-  test('missing root and unreadable dir give []/skip', async () => {
+  // chmod 000 is vacuous when running as root, so skip there
+  test.skipIf(process.getuid?.() === 0)('missing root and unreadable dir give []/skip', async () => {
     expect(await discover({ root: join(root, 'nope'), maxAgeMs: 1, now: NOW })).toEqual([])
     await touch(join(root, 'locked', 's.jsonl'), 10)
     await touch(join(root, 'ok', 't.jsonl'), 10)
