@@ -19,7 +19,7 @@ type Ev = DistOmit<NormalizedEvent, 'seq'>
 type Obj = Record<string, unknown>
 
 const MAX_LINE = 1_048_576
-const CHEAP_LIMIT = 350_000 // below this, chars cannot exceed MAX_LINE bytes (max 3 UTF-8 bytes per UTF-16 unit)
+const CHEAP_LIMIT = Math.floor(MAX_LINE / 3) // at or below this, even 3-byte chars (max per UTF-16 unit) fit in MAX_LINE bytes
 const MAX_SEEN = 512
 const MAX_OPEN = 1024
 // Known metadata line types: ignored by design, not "unrecognized".
@@ -31,7 +31,8 @@ const USER_BLOCKS = new Set(['tool_result', 'text', 'image'])
 const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v)
 const s = (v: unknown) => (typeof v === 'string' ? v : undefined)
 const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
-const label = (v: unknown) => (typeof v === 'string' ? v.replace(/[^\w.-]/g, '_').slice(0, 40) : 'none')
+// Only tame identifiers survive, so odd type values can never carry content into diag.
+const label = (kind: 'type' | 'block', v: unknown) => `${kind}=${typeof v === 'string' && /^[a-z_]{1,24}$/.test(v) ? v : 'other'}`
 const addCapped = (set: Set<string>, v: string, cap: number) => {
   set.delete(v)
   set.add(v)
@@ -59,7 +60,7 @@ export const parseLine = (src: SourceRef, line: string, ctx: ParseCtx, now?: num
     const unrecognized = (what: string) => { if (diag) { diag.unrecognized++; diag.lastUnrecognized = what } }
     if (o.type !== 'user' && o.type !== 'assistant') {
       if (typeof o.type === 'string' && IGNORED_TYPES.has(o.type)) { if (diag) diag.ignored++ }
-      else unrecognized(`type=${label(o.type)}`)
+      else unrecognized(label('type', o.type))
       return []
     }
     if (!isObj(o.message)) { unrecognized('message=invalid'); return [] }
@@ -70,6 +71,7 @@ export const parseLine = (src: SourceRef, line: string, ctx: ParseCtx, now?: num
     const out: Ev[] = []
     const push = <K extends Ev['kind']>(kind: K, fields: Omit<Extract<Ev, { kind: K }>, 'kind' | 'ts' | 'agent'>) => {
       const agent = { provider: 'claude', sessionId: src.sessionId, agentId: src.agentId, parentAgentId: undefined }
+      // Cast stays: TS cannot prove a generic spread satisfies the distributive union; `fields` is the typed gate.
       out.push({ ts, agent, kind, ...fields } as unknown as Ev)
     }
 
@@ -86,7 +88,7 @@ export const parseLine = (src: SourceRef, line: string, ctx: ParseCtx, now?: num
     const blocks = Array.isArray(msg.content) ? msg.content : []
     for (const b of blocks) {
       if (!isObj(b)) { unrecognized('block=invalid'); continue }
-      if (!(user ? USER_BLOCKS : ASSISTANT_BLOCKS).has(b.type as string)) { unrecognized(`block=${label(b.type)}`); continue }
+      if (!(user ? USER_BLOCKS : ASSISTANT_BLOCKS).has(b.type as string)) { unrecognized(label('block', b.type)); continue }
       if (user) {
         if (b.type === 'tool_result' && typeof b.tool_use_id === 'string') {
           closed.push(b.tool_use_id)

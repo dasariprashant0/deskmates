@@ -35,7 +35,19 @@ describe('diag counters', () => {
     expect(run('{}').d.unrecognized).toBe(1)
   })
   test('lastUnrecognized never carries content', () => {
-    expect(run(JSON.stringify({ type: 'a b/SECRET\n' + 'z'.repeat(100) })).d.lastUnrecognized).toMatch(/^type=[\w.-]{1,40}$/)
+    expect(run(JSON.stringify({ type: 'a b/SECRET\n' + 'z'.repeat(100) })).d.lastUnrecognized).toBe('type=other')
+  })
+  test('byte cap boundary for 3-byte characters', () => {
+    const cjk = (n: number) => '\u4e2d'.repeat(n)
+    expect(run(cjk(349_525)).d).toMatchObject({ oversize: 0, malformed: 1 })
+    expect(run(cjk(349_526)).d).toMatchObject({ oversize: 1, malformed: 0 })
+  })
+  test('lastUnrecognized only keeps tame labels', () => {
+    expect(run(JSON.stringify({ type: 'sk-FAKE-000' })).d.lastUnrecognized).toBe('type=other')
+    expect(run(JSON.stringify({ type: 'Has_Upper' })).d.lastUnrecognized).toBe('type=other')
+    expect(run(JSON.stringify({ type: 'a'.repeat(40) })).d.lastUnrecognized).toBe('type=other')
+    expect(run('{}').d.lastUnrecognized).toBe('type=other')
+    expect(run(asst([{ type: 'sk-FAKE-000' }])).d.lastUnrecognized).toBe('block=other')
   })
   test('non-object message is unrecognized', () => {
     expect(run('{"type":"user","message":"hi"}').d).toMatchObject({ unrecognized: 1, lastUnrecognized: 'message=invalid' })
