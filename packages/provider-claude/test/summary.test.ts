@@ -48,3 +48,25 @@ describe('toolActivity', () => {
     expect(toolActivity('Zzz')).toBe('running')
   })
 })
+
+describe('hardening', () => {
+  test('toolActivity ignores the prototype chain', () => {
+    for (const n of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) expect(toolActivity(n)).toBe('running')
+  })
+  test('Bash skips leading NAME=value tokens and strips paths', () => {
+    expect(summarize('Bash', { command: 'API_KEY=sk-FAKE-000 curl x' })).toBe('Bash: curl')
+    expect(summarize('Bash', { command: 'A=1 B=2 /usr/bin/make all' })).toBe('Bash: make')
+    expect(summarize('Bash', { command: 'API_KEY=sk-FAKE-000' })).toBe('Bash')
+    expect(summarize('Bash', { command: 'A="sk-FAKE 000" curl' })).toBe('Bash: curl')
+    expect(summarize('Bash', { command: '/Users/x/secret/run.sh --go' })).toBe('Bash: run.sh')
+    expect(summarize('Bash', { command: '/' })).toBe('Bash')
+  })
+  test('sudo and env are deliberately not special-cased', () => {
+    expect(summarize('Bash', { command: 'sudo rm -rf x' })).toBe('Bash: sudo')
+    expect(summarize('Bash', { command: 'env FOO=bar ls' })).toBe('Bash: env')
+  })
+  test('no secret or path leaks in any Bash label', () => {
+    const l = summarize('Bash', { command: 'API_KEY=sk-FAKE-000 /Users/x/secret/run.sh' })
+    expect(l).not.toMatch(/sk-FAKE|Users|secret/)
+  })
+})
