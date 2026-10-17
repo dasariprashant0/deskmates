@@ -10,14 +10,15 @@ const CHUNK = 64
 const META_MAX_BYTES = 64 * 1024
 const code = (e: unknown) => ((e as { code?: unknown })?.code as string | undefined) ?? 'UNKNOWN'
 
-// ENOENT (missing or vanished) is normal and silent; other errors go to onErr.
-const ls = (d: string, onErr?: (c: string) => void) =>
-  readdir(d, { withFileTypes: true }).catch((e) => { if (code(e) !== 'ENOENT') onErr?.(code(e)); return [] })
+// ENOENT (vanished mid-scan) is silent unless reportEnoent (the root call); other errors go to onErr.
+const ls = (d: string, onErr?: (c: string) => void, reportEnoent = false) =>
+  readdir(d, { withFileTypes: true }).catch((e) => { if (reportEnoent || code(e) !== 'ENOENT') onErr?.(code(e)); return [] })
 
 export const discover = async (opts: { root: string; maxAgeMs: number; now: number }, diag?: DiscoverDiag): Promise<SourceRef[]> => {
   const dirSkipped = () => { if (diag) diag.skippedDirs++ }
   const candidates: { filePath: string; ref: Omit<SourceRef, 'filePath' | 'provider'> }[] = []
-  for (const proj of await ls(opts.root, (c) => { if (diag) diag.rootError = c })) {
+  // A missing root is reported as ENOENT; the caller decides it means 'Claude not installed'.
+  for (const proj of await ls(opts.root, (c) => { if (diag) diag.rootError = c }, true)) {
     if (!proj.isDirectory()) continue
     const pDir = join(opts.root, proj.name)
     for (const e of await ls(pDir, dirSkipped)) {
@@ -25,6 +26,7 @@ export const discover = async (opts: { root: string; maxAgeMs: number; now: numb
         candidates.push({ filePath: join(pDir, e.name), ref: { sessionId: e.name.slice(0, -6), isSubagent: false } })
       } else if (e.isDirectory()) {
         const sessionDir = join(pDir, e.name)
+        // ponytail: one serial readdir per session dir; batch per project with Promise.all if scans get slow
         // Dirent (no symlink following) so a symlinked 'subagents' is skipped too.
         const sub = (await ls(sessionDir, dirSkipped)).find((x) => x.name === 'subagents' && x.isDirectory())
         if (!sub) continue
@@ -53,16 +55,18 @@ export const discover = async (opts: { root: string; maxAgeMs: number; now: numb
 }
 
 export const readSubagentMeta = async (metaPath: string, onWarn?: (code: 'meta-corrupt' | 'meta-shape') => void) => {
+  // A throwing callback must never be re-entered from the catch below.
+  const warn = (c: 'meta-corrupt' | 'meta-shape') => { try { onWarn?.(c) } catch { /* ignore */ } }
   try {
-    if ((await stat(metaPath)).size > META_MAX_BYTES) { onWarn?.('meta-corrupt'); return undefined }
+    if ((await stat(metaPath)).size > META_MAX_BYTES) { warn('meta-corrupt'); return undefined }
     const o: unknown = JSON.parse(await readFile(metaPath, 'utf8'))
-    if (!o || typeof o !== 'object' || Array.isArray(o)) { onWarn?.('meta-shape'); return undefined }
+    if (!o || typeof o !== 'object' || Array.isArray(o)) { warn('meta-shape'); return undefined }
     const r = o as Record<string, unknown>
     const str = (v: unknown) => (typeof v === 'string' ? v : undefined)
     return { agentType: str(r.agentType), description: str(r.description), toolUseId: str(r.toolUseId),
       spawnDepth: typeof r.spawnDepth === 'number' ? r.spawnDepth : undefined }
   } catch (e) {
-    if (code(e) !== 'ENOENT') onWarn?.('meta-corrupt')
+    if (code(e) !== 'ENOENT') warn('meta-corrupt')
     return undefined
   }
 }

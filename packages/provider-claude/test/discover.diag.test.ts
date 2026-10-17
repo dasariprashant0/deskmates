@@ -21,10 +21,15 @@ afterEach(async () => {
 })
 
 describe('discover diag', () => {
-  test('missing root is not an error', async () => {
+  test('missing root is reported as ENOENT (caller decides what it means)', async () => {
     const d = newDiscoverDiag()
     expect(await discover({ root: join(root, 'nope'), maxAgeMs: 1, now: NOW }, d)).toEqual([])
-    expect(d).toEqual({ skippedDirs: 0, skippedFiles: 0 })
+    expect(d).toEqual({ rootError: 'ENOENT', skippedDirs: 0, skippedFiles: 0 })
+  })
+  test('existing empty root has no rootError', async () => {
+    const d = newDiscoverDiag()
+    expect(await discover(opts(), d)).toEqual([])
+    expect(d.rootError).toBeUndefined()
   })
   test('other root errors give the code only', async () => {
     await writeFile(join(root, 'afile'), '')
@@ -84,5 +89,18 @@ describe('readSubagentMeta hardening', () => {
     await writeFile(m, JSON.stringify({ agentType: 'a'.repeat(70_000) }))
     expect(await readSubagentMeta(m, onWarn)).toBeUndefined()
     expect(w).toHaveLength(3)
+  })
+  test('a throwing onWarn is called once per file', async () => {
+    let calls = 0
+    const m = join(root, 'm.json')
+    await writeFile(m, '{bad')
+    expect(await readSubagentMeta(m, () => { calls++; throw new Error('cb') })).toBeUndefined()
+    expect(calls).toBe(1)
+  })
+  test.skipIf(asRoot)('non-ENOENT stat error warns exactly once', async () => {
+    await touch(join(root, 'nox', 'm.json')); await chmod(join(root, 'nox'), 0o600)
+    const w: string[] = []
+    expect(await readSubagentMeta(join(root, 'nox', 'm.json'), (c) => w.push(c))).toBeUndefined()
+    expect(w).toEqual(['meta-corrupt'])
   })
 })
