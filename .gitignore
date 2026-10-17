@@ -2,3 +2,4 @@ node_modules
 dist
 .deskmates
 *.log
+.cto-toolkit
