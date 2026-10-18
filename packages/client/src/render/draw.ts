@@ -162,7 +162,7 @@ const line = (c: Ctx2D, pts: [number, number][]): void => {
 }
 
 /** Status ring on the floor plus a mark beside the head. Shape, not colour, tells statuses apart. */
-export function drawRing(c: Ctx2D, ring: Ring, x: number, y: number, tick: number): void {
+export function drawRing(c: Ctx2D, ring: Ring, x: number, y: number, tick: number, reducedMotion = false): void {
   if (ring === 'idle') return
   c.strokeStyle = RING_COLOR[ring]
   c.fillStyle = RING_COLOR[ring]
@@ -188,7 +188,7 @@ export function drawRing(c: Ctx2D, ring: Ring, x: number, y: number, tick: numbe
       c.setLineDash([])
       ell(9, 4)
       ell(11, 5)
-      if (Math.floor(tick / 400) % 2 === 0) {
+      if (reducedMotion || Math.floor(tick / 400) % 2 === 0) { // static when reduced motion is on
         c.font = 'bold 9px monospace'
         c.textAlign = 'center'
         c.textBaseline = 'alphabetic'
@@ -212,18 +212,62 @@ export function drawRing(c: Ctx2D, ring: Ring, x: number, y: number, tick: numbe
 
 const SPRITE_W = 16
 const SPRITE_H = 24
+const MARGIN = 2
+const TAG_H = 10
+const TAG_STEP = 11
 
-function drawTag(c: Ctx2D, text: string, cx: number, baseY: number, bg: string, fg: string): void {
+export type DrawOpts = { reducedMotion?: boolean; selectedKey?: string }
+type Rect = { x: number; y: number; w: number; h: number }
+const hit = (a: Rect, b: Rect): boolean => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
+
+/**
+ * Draws a tag whose rect stays 2 px inside the view horizontally and never overlaps an already placed tag
+ * (it steps by `dir` * 11 px until free). Returns the rect it used.
+ */
+function placeTag(c: Ctx2D, text: string, cx: number, baseY: number, dir: 1 | -1, placed: Rect[], bg: string, fg: string): Rect {
   c.font = '7px monospace'
   c.textAlign = 'center'
   c.textBaseline = 'alphabetic'
   const w = Math.ceil(c.measureText(text).width) + 4
-  rect(c, bg, Math.round(cx - w / 2), baseY - 8, w, 10)
+  const x = Math.max(MARGIN, Math.min(Math.round(cx - w / 2), VIEW_W - MARGIN - w))
+  let by = baseY
+  for (let i = 0; i < 8 && placed.some((p) => hit(p, { x, y: by - 8, w, h: TAG_H })); i++) by += dir * TAG_STEP
+  const r = { x, y: by - 8, w, h: TAG_H }
+  rect(c, bg, r.x, r.y, r.w, r.h)
   c.fillStyle = fg
-  c.fillText(text, Math.round(cx), baseY)
+  c.fillText(text, r.x + w / 2, by)
+  placed.push(r)
+  return r
 }
 
-export function drawCharacter(c: Ctx2D, v: CharacterView, sprites: Sprites, cache: BitmapCache, tick: number): void {
+/** Name tag above the head, speech bubble above the tag (below the feet when there is no room above). */
+function drawLabels(c: Ctx2D, v: CharacterView, placed: Rect[]): void {
+  const x = Math.round(v.x)
+  const y = Math.round(v.y)
+  c.globalAlpha = v.fade
+  const tag = placeTag(c, v.name, x, y - SPRITE_H - 1, -1, placed, PAL.tagBg, PAL.text)
+  if (v.bubble) {
+    const text = clipBubble(v.bubble)
+    const above = tag.y - 3
+    if (above - 8 >= MARGIN) placeTag(c, text, x, above, -1, placed, PAL.bubbleBg, PAL.bubbleText)
+    else placeTag(c, text, x, y + 14, 1, placed, PAL.bubbleBg, PAL.bubbleText)
+  }
+  c.globalAlpha = 1
+}
+
+/** Corner brackets around the sprite: a shape, not only a colour, marks the selection. */
+function drawSelection(c: Ctx2D, x: number, y: number): void {
+  const l = x - 10
+  const r = x + 9
+  const t = y - 27
+  const b = y + 3
+  for (const [cx, cy, dx, dy] of [[l, t, 1, 1], [r, t, -1, 1], [l, b, 1, -1], [r, b, -1, -1]] as const) {
+    rect(c, PAL.accent, dx > 0 ? cx : cx - 3, cy, 4, 1)
+    rect(c, PAL.accent, cx, dy > 0 ? cy : cy - 3, 1, 4)
+  }
+}
+
+function drawBody(c: Ctx2D, v: CharacterView, sprites: Sprites, cache: BitmapCache, tick: number, o: DrawOpts): void {
   const x = Math.round(v.x)
   const y = Math.round(v.y)
   c.globalAlpha = v.fade
@@ -231,22 +275,29 @@ export function drawCharacter(c: Ctx2D, v: CharacterView, sprites: Sprites, cach
   c.beginPath()
   c.ellipse(x, y - 1, 6, 2.5, 0, 0, Math.PI * 2)
   c.fill()
-  drawRing(c, v.ring, x, y, tick)
+  drawRing(c, v.ring, x, y, tick, o.reducedMotion === true)
   const frames = sprites.get(v.name).frames[`${v.anim}:${v.dir}`]
   const f = frames?.[v.frame % (frames.length || 1)]
   if (f) c.drawImage(cache.get(v.name, v.anim, v.dir, v.frame, f), x - SPRITE_W / 2, y - SPRITE_H + 1)
-  drawTag(c, v.name, x, y - SPRITE_H - 1, PAL.tagBg, PAL.text)
-  if (v.bubble) drawTag(c, clipBubble(v.bubble), x, y - SPRITE_H - 12, PAL.bubbleBg, PAL.bubbleText)
+  if (o.selectedKey !== undefined && o.selectedKey === v.key) drawSelection(c, x, y)
   c.globalAlpha = 1
 }
 
-export function drawCharacters(c: Ctx2D, views: readonly CharacterView[], sprites: Sprites, cache: BitmapCache, tick: number): void {
-  const sorted = [...views].sort((a, b) => a.y - b.y)
-  for (const v of sorted) drawCharacter(c, v, sprites, cache, tick)
+export function drawCharacter(c: Ctx2D, v: CharacterView, sprites: Sprites, cache: BitmapCache, tick: number, o: DrawOpts = {}): void {
+  drawBody(c, v, sprites, cache, tick, o)
+  drawLabels(c, v, [])
 }
 
-export function drawScene(c: Ctx2D, layout: Layout, views: readonly CharacterView[], sprites: Sprites, cache: BitmapCache, tick: number): void {
+/** Bodies back to front, then all labels on top so no sprite covers a name or bubble. */
+export function drawCharacters(c: Ctx2D, views: readonly CharacterView[], sprites: Sprites, cache: BitmapCache, tick: number, o: DrawOpts = {}): void {
+  const sorted = [...views].sort((a, b) => a.y - b.y)
+  for (const v of sorted) drawBody(c, v, sprites, cache, tick, o)
+  const placed: Rect[] = []
+  for (const v of sorted) drawLabels(c, v, placed)
+}
+
+export function drawScene(c: Ctx2D, layout: Layout, views: readonly CharacterView[], sprites: Sprites, cache: BitmapCache, tick: number, o: DrawOpts = {}): void {
   drawFloor(c)
   drawFurniture(c, layout)
-  drawCharacters(c, views, sprites, cache, tick)
+  drawCharacters(c, views, sprites, cache, tick, o)
 }

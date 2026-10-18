@@ -10,3 +10,12 @@ canvas#office:focus-visible { outline: 3px solid var(--accent); outline-offset: 
 #status { left: 8px; }
 #status:empty, #status[hidden], #badge[hidden] { display: none; }
 #badge { right: 8px; border: 1px solid var(--accent); }
+#card { position: fixed; top: 44px; right: 8px; bottom: auto; width: min(340px, calc(100vw - 16px)); max-height: calc(100vh - 100px); overflow: auto; box-sizing: border-box; padding: 12px 14px; border: 2px solid var(--accent); border-radius: 6px; background: #0d0c1a; color: var(--fg); font: 14px/1.5 ui-monospace, Menlo, monospace; }
+#card[hidden] { display: none; }
+#card h2 { margin: 0 0 8px; font-size: 16px; overflow-wrap: anywhere; }
+#card dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 0 0 10px; }
+#card dt { color: #a9a3c2; }
+#card dd { margin: 0; overflow-wrap: anywhere; }
+#card button { min-height: 44px; min-width: 44px; padding: 0 14px; border: 2px solid var(--accent); border-radius: 4px; background: transparent; color: var(--fg); font: inherit; cursor: pointer; }
+#card button:focus-visible { outline: 3px solid var(--fg); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
