@@ -1,4 +1,5 @@
-import { readdir, readFile, stat } from 'node:fs/promises'
+import { constants } from 'node:fs'
+import { open, readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { SourceRef } from './parse'
 
@@ -57,9 +58,16 @@ export const discover = async (opts: { root: string; maxAgeMs: number; now: numb
 export const readSubagentMeta = async (metaPath: string, onWarn?: (code: 'meta-corrupt' | 'meta-shape') => void) => {
   // A throwing callback must never be re-entered from the catch below.
   const warn = (c: 'meta-corrupt' | 'meta-shape') => { try { onWarn?.(c) } catch { /* ignore */ } }
+  let fh: Awaited<ReturnType<typeof open>> | undefined
   try {
-    if ((await stat(metaPath)).size > META_MAX_BYTES) { warn('meta-corrupt'); return undefined }
-    const o: unknown = JSON.parse(await readFile(metaPath, 'utf8'))
+    // O_NONBLOCK so a FIFO cannot block open; regular-file check on the handle (no TOCTOU).
+    fh = await open(metaPath, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0))
+    const st = await fh.stat()
+    if (!st.isFile() || st.size > META_MAX_BYTES) { warn('meta-corrupt'); return undefined }
+    const buf = Buffer.alloc(META_MAX_BYTES + 1)
+    const { bytesRead } = await fh.read(buf, 0, buf.length, 0)
+    if (bytesRead > META_MAX_BYTES) { warn('meta-corrupt'); return undefined }
+    const o: unknown = JSON.parse(buf.toString('utf8', 0, bytesRead))
     if (!o || typeof o !== 'object' || Array.isArray(o)) { warn('meta-shape'); return undefined }
     const r = o as Record<string, unknown>
     const str = (v: unknown) => (typeof v === 'string' ? v : undefined)
@@ -68,5 +76,7 @@ export const readSubagentMeta = async (metaPath: string, onWarn?: (code: 'meta-c
   } catch (e) {
     if (code(e) !== 'ENOENT') warn('meta-corrupt')
     return undefined
+  } finally {
+    await fh?.close().catch(() => {})
   }
 }
