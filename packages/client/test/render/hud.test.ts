@@ -4,6 +4,9 @@ import { summarize } from '../../src/hud/summary'
 import type { Ctx2D } from '../../src/render/draw'
 import { drawHud } from '../../src/render/hud'
 import { FLOOR_TILES, HUD_PAIRS, RING_COLOR } from '../../src/render/palette'
+const EX = { source: 'example', asOf: '2026-10-18' } as const
+const USER = { source: 'user', asOf: '2026-10-18' } as const
+const DEF = { source: 'default', asOf: '2026-10-18' } as const
 
 type Op = { op: string; args: unknown[] }
 const recorder = (): { ctx: Ctx2D; ops: Op[] } => {
@@ -30,7 +33,7 @@ describe('drawHud fit', () => {
       mk('e', { status: 'error' }),
       mk('n', { status: 'waiting', attention: { toolUseId: 'x', source: 'hook', since: 1 } }),
     ),
-    EXAMPLE_PRICES, true, 0,
+    EXAMPLE_PRICES, EX, 0,
   )
   test.each([320, 480, 640, 1280])('nothing is cut off and errors + cost stay visible at %i px', (w) => {
     const r = recorder()
@@ -54,14 +57,14 @@ describe('drawHud fit', () => {
 describe('drawHud', () => {
   test('empty state draws without throwing and shows zero counts', () => {
     const r = recorder()
-    const hits = drawHud(r.ctx, summarize(office(), EXAMPLE_PRICES, true, 0), box, 1)
+    const hits = drawHud(r.ctx, summarize(office(), EXAMPLE_PRICES, EX, 0), box, 1)
     expect(hits).toEqual([])
     const all = texts(r.ops).join(' ')
     expect(all).toContain('0 working')
     expect(all).toContain('0 needs you')
   })
   test('shows counts, tokens, ~cost and the example marker', () => {
-    const s = summarize(office(mk('a', { model: 'example-model', usage: { input: 2_000_000, cacheWrite: 0, cacheRead: 0, output: 0 } }), mk('b', { status: 'error' })), EXAMPLE_PRICES, true, 0)
+    const s = summarize(office(mk('a', { model: 'example-model', usage: { input: 2_000_000, cacheWrite: 0, cacheRead: 0, output: 0 } }), mk('b', { status: 'error' })), EXAMPLE_PRICES, EX, 0)
     const r = recorder()
     drawHud(r.ctx, s, box, 1)
     const all = texts(r.ops).join(' | ')
@@ -73,13 +76,13 @@ describe('drawHud', () => {
   })
   test('no example marker for real prices', () => {
     const r = recorder()
-    drawHud(r.ctx, summarize(office(mk('a')), EXAMPLE_PRICES, false, 0), box, 1)
+    drawHud(r.ctx, summarize(office(mk('a')), EXAMPLE_PRICES, USER, 0), box, 1)
     expect(texts(r.ops).join(' ')).not.toContain('example prices')
   })
   test('at most 3 chips, overflow is +N, chips carry a text label', () => {
     const waits = ['a', 'b', 'c', 'd', 'e'].map((s, i) => mk(s, { status: 'waiting', attention: { toolUseId: s, source: i === 0 ? 'heuristic' : 'hook', since: i } }))
     const r = recorder()
-    const hits = drawHud(r.ctx, summarize(office(...waits), EXAMPLE_PRICES, false, 0), box, 1)
+    const hits = drawHud(r.ctx, summarize(office(...waits), EXAMPLE_PRICES, USER, 0), box, 1)
     expect(hits).toHaveLength(3)
     expect(hits.map((h) => h.key)).toEqual(['t:a:main', 't:b:main', 't:c:main'])
     const t = texts(r.ops)
@@ -90,7 +93,7 @@ describe('drawHud', () => {
     const waits = ['aaaa', 'bbbb'].map((s) => mk(s, { status: 'waiting', attention: { toolUseId: s, source: 'hook', since: 1 } }))
     const r = recorder()
     const narrow = { x: 0, y: 0, w: 700, h: 40 }
-    const hits = drawHud(r.ctx, summarize(office(...waits), EXAMPLE_PRICES, false, 0), narrow, 1)
+    const hits = drawHud(r.ctx, summarize(office(...waits), EXAMPLE_PRICES, USER, 0), narrow, 1)
     for (const h of hits) expect(h.x + h.w).toBeLessThanOrEqual(narrow.w)
     expect(hits.length + Number((texts(r.ops).find((x) => /^\+\d+$/.test(x)) ?? '+0').slice(1))).toBe(2)
   })
@@ -98,14 +101,14 @@ describe('drawHud', () => {
     const w = mk('a', { status: 'waiting', attention: { toolUseId: 'x', source: 'hook', since: 1 } })
     const strokes = (sel?: string) => {
       const r = recorder()
-      drawHud(r.ctx, summarize(office(w), EXAMPLE_PRICES, false, 0), box, 1, sel)
+      drawHud(r.ctx, summarize(office(w), EXAMPLE_PRICES, USER, 0), box, 1, sel)
       return r.ops.filter((o) => o.op === 'strokeRect').length
     }
     expect(strokes(w.key)).toBeGreaterThan(strokes())
   })
   test('markup in names stays text', () => {
     const r = recorder()
-    drawHud(r.ctx, summarize(office(mk('x', { cwd: '/p/<img src=x onerror=1>', status: 'waiting', attention: { toolUseId: 'x', source: 'hook', since: 1 } })), EXAMPLE_PRICES, false, 0), box, 1)
+    drawHud(r.ctx, summarize(office(mk('x', { cwd: '/p/<img src=x onerror=1>', status: 'waiting', attention: { toolUseId: 'x', source: 'hook', since: 1 } })), EXAMPLE_PRICES, USER, 0), box, 1)
     expect(r.ops.every((o) => o.op !== 'drawImage')).toBe(true)
   })
 })
@@ -132,7 +135,7 @@ describe('ring contrast', () => {
 })
 
 describe('drawHud hidden count', () => {
-  const base = summarize(office(mk('a')), EXAMPLE_PRICES, true, 0)
+  const base = summarize(office(mk('a')), EXAMPLE_PRICES, EX, 0)
   test('shows +N idle only when something is hidden', () => {
     const none = recorder()
     drawHud(none.ctx, base, box, 1)
@@ -148,9 +151,20 @@ describe('drawHud hidden count', () => {
     expect(texts(r.ops).join(' ')).toMatch(/\+12/)
   })
   test('chips use the short numbered name', () => {
-    const s = summarize(office(mk('a', { status: 'waiting', attention: { toolUseId: 'x', source: 'hook', since: 1 }, cwd: '/w/proj', startedAt: 1 }), mk('b', { cwd: '/w/proj', startedAt: 2 })), EXAMPLE_PRICES, true, 0)
+    const s = summarize(office(mk('a', { status: 'waiting', attention: { toolUseId: 'x', source: 'hook', since: 1 }, cwd: '/w/proj', startedAt: 1 }), mk('b', { cwd: '/w/proj', startedAt: 2 })), EXAMPLE_PRICES, EX, 0)
     const r = recorder()
     drawHud(r.ctx, s, box, 1)
     expect(texts(r.ops)).toContain('proj #1')
   })
+})
+
+describe('hud price label', () => {
+  const run = (m: typeof EX | typeof USER | typeof DEF) => {
+    const r = recorder()
+    drawHud(r.ctx, summarize(office(mk('a', { model: 'example-model', usage: { input: 2_000_000, cacheWrite: 0, cacheRead: 0, output: 0 } })), EXAMPLE_PRICES, m, 0), box, 1)
+    return texts(r.ops).join(' | ')
+  }
+  test('default: ~$X est., no example marker', () => { const a = run(DEF); expect(a).toContain('~$2.00 est.'); expect(a).not.toContain('example prices') })
+  test('user: ~$X without est.', () => { const a = run(USER); expect(a).toContain('~$2.00'); expect(a).not.toContain('est.') })
+  test('example: marker only', () => { const a = run(EX); expect(a).toContain('example prices'); expect(a).not.toContain('est.') })
 })

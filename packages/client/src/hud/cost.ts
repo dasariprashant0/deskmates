@@ -1,4 +1,4 @@
-import type { PriceTable, Usage } from '@deskmates/core'
+import { normalizeModelId, PRICES_AS_OF, type PriceTable, type PricesSource, type Usage } from '@deskmates/core'
 
 export type CostEstimate = { usd: number; known: boolean }
 
@@ -7,10 +7,21 @@ const count = (n: number): number => (Number.isFinite(n) && n > 0 ? n : 0)
 
 /** ESTIMATE only: tokens x per-million price. Unknown model => known:false, usd 0. Never NaN or negative. */
 export function estimateCost(usage: Usage, model: string | undefined, prices: PriceTable): CostEstimate {
-  const p = model !== undefined && Object.hasOwn(prices, model) ? prices[model] : undefined
+  const id = typeof model === 'string' ? normalizeModelId(model) : ''
+  const p = id !== '' && Object.hasOwn(prices, id) ? prices[id] : undefined
   if (!p) return { usd: 0, known: false }
   const usd = (count(usage.input) * p.inputPerMTok + count(usage.cacheWrite) * p.cacheWritePerMTok + count(usage.cacheRead) * p.cacheReadPerMTok + count(usage.output) * p.outputPerMTok) / 1e6
   return { usd: Number.isFinite(usd) && usd > 0 ? Math.min(usd, MAX_USD) : 0, known: true }
+}
+
+export type PricesMeta = { source: PricesSource; asOf: string }
+export const DEFAULT_META: PricesMeta = { source: 'example', asOf: PRICES_AS_OF }
+
+/** Plain-language provenance of the estimate; '' for example prices (those have their own marker). */
+export function pricesNote(m: PricesMeta): string {
+  if (m.source === 'default') return `Estimated from built-in prices as of ${m.asOf}; override in ~/.deskmates/prices.json`
+  if (m.source === 'user') return 'Estimated from your prices.json'
+  return ''
 }
 
 const price = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0

@@ -1,4 +1,4 @@
-import { EXAMPLE_PRICES, type PriceTable } from '@deskmates/core'
+import { DEFAULT_PRICES, PRICES_AS_OF, type PriceTable, type PricesSource } from '@deskmates/core'
 import { constants } from 'node:fs'
 import { open } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -8,12 +8,15 @@ const FIELDS = ['inputPerMTok', 'cacheWritePerMTok', 'cacheReadPerMTok', 'output
 const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1_000_000
 
 export type PricesReason = 'missing' | 'prices-unreadable' | 'prices-too-large' | 'prices-invalid-json' | 'prices-invalid-shape'
-export type PricesResult = { prices: PriceTable; isExample: boolean; reason?: PricesReason }
+export type PricesResult = { prices: PriceTable; source: PricesSource; asOf: string; /** true only for source 'example' */ isExample: boolean; reason?: PricesReason }
 
-export const loadPrices = async (opts: { homeDir: string; warn?: (code: string) => void }): Promise<PricesResult> => {
+/** `defaults` is for tests/demo: any table other than DEFAULT_PRICES is reported as source 'example'. User entries win per model. */
+export const loadPrices = async (opts: { homeDir: string; warn?: (code: string) => void; defaults?: PriceTable }): Promise<PricesResult> => {
+  const defaults = opts.defaults ?? DEFAULT_PRICES
+  const base: PricesSource = defaults === DEFAULT_PRICES ? 'default' : 'example'
   const fail = (reason: PricesReason): PricesResult => {
     if (reason !== 'missing') { try { opts.warn?.(reason) } catch { /* ignore */ } }
-    return { prices: EXAMPLE_PRICES, isExample: true, reason }
+    return { prices: defaults, source: base, asOf: PRICES_AS_OF, isExample: base === 'example', reason }
   }
   let text: string
   try {
@@ -39,7 +42,7 @@ export const loadPrices = async (opts: { homeDir: string; warn?: (code: string) 
   let raw: unknown
   try { raw = JSON.parse(text) } catch { return fail('prices-invalid-json') }
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return fail('prices-invalid-shape')
-  const prices: PriceTable = Object.create(null)
+  const prices: PriceTable = Object.assign(Object.create(null) as PriceTable, defaults)
   for (const [model, v] of Object.entries(raw)) {
     if (model === '__proto__') continue // never a real model id; skipped before validation
     if (!v || typeof v !== 'object' || Array.isArray(v)) return fail('prices-invalid-shape')
@@ -49,5 +52,5 @@ export const loadPrices = async (opts: { homeDir: string; warn?: (code: string) 
     if (!num(i) || !num(cw) || !num(cr) || !num(o)) return fail('prices-invalid-shape')
     prices[model] = { inputPerMTok: i, cacheWritePerMTok: cw, cacheReadPerMTok: cr, outputPerMTok: o }
   }
-  return { prices, isExample: false }
+  return { prices, source: 'user', asOf: PRICES_AS_OF, isExample: false }
 }

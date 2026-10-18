@@ -1,7 +1,7 @@
 // Browser entry. The only file that touches window, document and location.
 import { generateSprite, type Frame, type SpriteSheet } from '@deskmates/sprites'
 import { createDemo, createConnection, createMirror, demoSnapshot, isDemo, readToken, stripFragment, type Mirror, type Status } from './index'
-import { asPriceTable, formatTokens } from './hud/cost'
+import { asPriceTable, DEFAULT_META, formatTokens, pricesNote, type PricesMeta } from './hud/cost'
 import { createAnnouncer } from './hud/announce'
 import { cycleKey, describeTotals, shortDir, summarize, type AgentRow, type Summary } from './hud/summary'
 import { createBitmapCache, drawCharacters, drawFloor, drawFurniture, type Ctx2D } from './render/draw'
@@ -144,7 +144,7 @@ const updateMirror = (sm: Summary): void => {
 
 // ---- selection, agent card, HUD ---------------------------------------------------------------
 const HUD_CSS_H = 32
-let summary: Summary = { agents: [], needsYou: [], totals: { running: 0, thinking: 0, needsYou: 0, errors: 0, tokens: 0, usd: 0, anyExample: false, partialCost: false } }
+let summary: Summary = { agents: [], needsYou: [], totals: { running: 0, thinking: 0, needsYou: 0, errors: 0, tokens: 0, usd: 0, anyExample: false, partialCost: false, prices: DEFAULT_META } }
 let selectedKey: string | undefined
 let hoveredKey: string | undefined
 let hudHits: ChipHit[] = []
@@ -153,6 +153,11 @@ let priceTable = asPriceTable(undefined)
 
 const setText = (e: HTMLElement, t: string): void => { if (e.textContent !== t) e.textContent = t }
 const cardOpen = (): boolean => !cardEl.hidden
+const pricesMeta = (): PricesMeta => ({ source: mirror.pricesSource(), asOf: mirror.pricesAsOf() })
+const cardPriceNote = (): string => {
+  const m = pricesMeta()
+  return m.source === 'example' ? ' (example prices)' : ` (${pricesNote(m)})`
+}
 const fillCard = (r: AgentRow): void => {
   const u = r.usage
   setText(cardFields.name, r.name)
@@ -161,7 +166,7 @@ const fillCard = (r: AgentRow): void => {
   setText(cardFields.dir, shortDir(r.cwd))
   setText(cardFields.model, r.model ?? 'unknown')
   setText(cardFields.tokens, `${r.tokensLabel} (in ${formatTokens(u.input)}, out ${formatTokens(u.output)}, cache ${formatTokens(u.cacheRead + u.cacheWrite)})`)
-  setText(cardFields.cost, `${r.costLabel}${r.cost.known && mirror.pricesAreExample() ? ' (example prices)' : ''}`)
+  setText(cardFields.cost, `${r.costLabel}${r.cost.known ? cardPriceNote() : ''}`)
   setText(cardFields.elapsed, r.elapsedLabel)
   setText(cardFields.subs, String(r.subagents))
 }
@@ -257,7 +262,7 @@ const draw = (): void => {
     lastRefresh = now
     const raw = mirror.prices()
     if (raw !== rawPrices) { rawPrices = raw; priceTable = asPriceTable(raw) }
-    summary = { ...summarize(mirror.state(), priceTable, mirror.pricesAreExample(), now), hidden: sim.hiddenCount() }
+    summary = { ...summarize(mirror.state(), priceTable, pricesMeta(), now), hidden: sim.hiddenCount() }
     updateMirror(summary)
     const totals = describeTotals(summary.totals, summary.hidden)
     if (totals !== lastTotals) { lastTotals = totals; summaryEl.textContent = totals }

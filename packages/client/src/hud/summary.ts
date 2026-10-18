@@ -1,7 +1,7 @@
 import type { AgentState, OfficeState, PriceTable, Usage } from '@deskmates/core'
 import { CELEBRATE_MS, deriveName } from '../sim/character'
 import { labelAgents, type AgentLabel } from './labels'
-import { estimateCost, formatCost, formatElapsed, formatTokens, type CostEstimate } from './cost'
+import { estimateCost, formatCost, formatElapsed, formatTokens, pricesNote, type CostEstimate, type PricesMeta } from './cost'
 
 export const ENDED_GRACE_MS = CELEBRATE_MS
 
@@ -29,7 +29,7 @@ export type AgentRow = {
   /** When it started waiting (needs-you sorting). */
   since: number
 }
-export type Totals = { running: number; thinking: number; needsYou: number; errors: number; tokens: number; usd: number; anyExample: boolean; partialCost: boolean }
+export type Totals = { running: number; thinking: number; needsYou: number; errors: number; tokens: number; usd: number; anyExample: boolean; partialCost: boolean; prices: PricesMeta }
 export type Summary = {
   agents: AgentRow[]
   needsYou: AgentRow[]
@@ -70,7 +70,7 @@ const row = (a: AgentState, prices: PriceTable, now: number, label: AgentLabel |
   }
 }
 
-export function summarize(state: OfficeState, prices: PriceTable, pricesAreExample: boolean, now: number): Summary {
+export function summarize(state: OfficeState, prices: PriceTable, meta: PricesMeta, now: number): Summary {
   const agents: AgentRow[] = []
   const labels = labelAgents(state)
   const seen = new Set<string>()
@@ -82,7 +82,7 @@ export function summarize(state: OfficeState, prices: PriceTable, pricesAreExamp
     agents.push(row(a, prices, now, labels.get(k)))
   }
   const needsYou = agents.filter((r) => r.needs).sort((a, b) => a.since - b.since) // stable: ties keep order
-  const t: Totals = { running: 0, thinking: 0, needsYou: needsYou.length, errors: 0, tokens: 0, usd: 0, anyExample: false, partialCost: false }
+  const t: Totals = { running: 0, thinking: 0, needsYou: needsYou.length, errors: 0, tokens: 0, usd: 0, anyExample: false, partialCost: false, prices: meta }
   for (const r of agents) {
     if (!r.needs && r.status === 'working') t.running++
     if (!r.needs && r.status === 'thinking') t.thinking++
@@ -90,7 +90,7 @@ export function summarize(state: OfficeState, prices: PriceTable, pricesAreExamp
     t.tokens += r.tokens
     t.usd += r.cost.usd
     if (!r.cost.known) t.partialCost = true
-    else if (pricesAreExample) t.anyExample = true
+    else if (meta.source === 'example') t.anyExample = true
   }
   return { agents, needsYou, totals: t }
 }
@@ -98,8 +98,10 @@ export function summarize(state: OfficeState, prices: PriceTable, pricesAreExamp
 /** One plain sentence for the visually hidden summary element. */
 export function describeTotals(t: Totals, hidden = 0): string {
   const cost = formatCost({ usd: t.usd, known: true })
+  const n = pricesNote(t.prices)
+  const note = n === '' ? '' : ` ${n}.`
   const more = hidden > 0 ? ` ${hidden} more sessions not shown because they are idle or finished.` : ''
-  return `${t.running} working, ${t.thinking} thinking, ${t.needsYou} need you, ${t.errors} errors. ${formatTokens(t.tokens)} tokens. Estimated cost ${cost}${t.partialCost ? '+' : ''}${t.anyExample ? ' (example prices)' : ''}.${more}`
+  return `${t.running} working, ${t.thinking} thinking, ${t.needsYou} need you, ${t.errors} errors. ${formatTokens(t.tokens)} tokens. Estimated cost ${cost}${t.partialCost ? '+' : ''}${t.anyExample ? ' (example prices)' : ''}.${note}${more}`
 }
 
 const HOME = /^(?:\/Users\/[^/]+|\/home\/[^/]+|[A-Za-z]:\\Users\\[^\\]+)/

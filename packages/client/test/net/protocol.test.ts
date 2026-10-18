@@ -75,3 +75,18 @@ describe('parseServerMessage', () => {
 test('encodeResync', () => {
   expect(JSON.parse(encodeResync())).toEqual({ type: 'resync' })
 })
+
+describe('snapshot price provenance', () => {
+  const parse = (extra: object) => parseServerMessage({ ...snap, ...extra })
+  test('parses pricesSource and pricesAsOf', () => {
+    const m = parse({ pricesSource: 'default', pricesAsOf: '2026-10-18' })
+    expect(m).toMatchObject({ type: 'snapshot', pricesSource: 'default', pricesAsOf: '2026-10-18' })
+  })
+  test('tolerates missing and malformed fields', () => {
+    for (const extra of [{}, { pricesSource: 'weird', pricesAsOf: 5 }, { pricesSource: {}, pricesAsOf: 'x'.repeat(100) }]) {
+      const m = parse(extra)
+      expect(m.type).toBe('snapshot')
+      if (m.type === 'snapshot') { expect(m.pricesSource).toBeUndefined(); expect(m.pricesAsOf).toBeUndefined() }
+    }
+  })
+})

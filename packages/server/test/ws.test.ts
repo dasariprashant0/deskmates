@@ -31,7 +31,7 @@ const until = async (fn: () => boolean, ms = 4000): Promise<void> => {
 
 const start = async (o: Partial<WsOpts> = {}) => {
   bus = new EventBus()
-  hub = createWsHub({ bus, token: TOKEN, getPort: () => port, getExtras: () => ({ prices: EXAMPLE_PRICES, pricesAreExample: true }), flushMs: 30, ...o })
+  hub = createWsHub({ bus, token: TOKEN, getPort: () => port, getExtras: () => ({ prices: EXAMPLE_PRICES, pricesSource: 'example', pricesAsOf: '2026-10-18' }), flushMs: 30, ...o })
   server = http.createServer((_q, r) => { r.statusCode = 404; r.end() })
   server.on('upgrade', hub.handleUpgrade)
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
@@ -169,7 +169,7 @@ describe('streaming', () => {
     const c = await connect()
     await until(() => c.msgs.length > 0)
     const m = first(c)
-    expect(m).toMatchObject({ type: 'snapshot', v: 1, seq: 1, pricesAreExample: true })
+    expect(m).toMatchObject({ type: 'snapshot', v: 1, seq: 1, pricesAreExample: true, pricesSource: 'example', pricesAsOf: '2026-10-18' })
     expect(Object.keys((m.state as { agents: object }).agents)).toHaveLength(1)
     expect(m.prices).toBeTruthy()
   })

@@ -1,4 +1,4 @@
-import { emptyState, reduce, type OfficeState } from '@deskmates/core'
+import { emptyState, PRICES_AS_OF, reduce, type OfficeState, type PricesSource } from '@deskmates/core'
 import type { EventsMessage, SnapshotMessage } from './protocol'
 
 export type MirrorStats = { snapshots: number; batches: number; gaps: number; stale: number; invalid: number }
@@ -10,6 +10,8 @@ export type Mirror = {
   seq(): number
   prices(): unknown
   pricesAreExample(): boolean
+  pricesSource(): PricesSource
+  pricesAsOf(): string
   stats(): MirrorStats
 }
 
@@ -17,7 +19,8 @@ export function createMirror(): Mirror {
   let state = emptyState()
   let seq = 0
   let prices: unknown = {}
-  let example = true
+  let source: PricesSource = 'example'
+  let asOf = PRICES_AS_OF
   const st: MirrorStats = { snapshots: 0, batches: 0, gaps: 0, stale: 0, invalid: 0 }
   return {
     applySnapshot(msg) {
@@ -26,7 +29,8 @@ export function createMirror(): Mirror {
       state = { ...msg.state, seq: msg.seq }
       seq = msg.seq
       prices = msg.prices
-      example = msg.pricesAreExample
+      source = msg.pricesSource ?? (msg.pricesAreExample ? 'example' : 'user')
+      asOf = msg.pricesAsOf ?? PRICES_AS_OF
     },
     applyEvents(msg) {
       st.batches++
@@ -46,7 +50,9 @@ export function createMirror(): Mirror {
     state: () => state,
     seq: () => seq,
     prices: () => prices,
-    pricesAreExample: () => example,
+    pricesAreExample: () => source === 'example',
+    pricesSource: () => source,
+    pricesAsOf: () => asOf,
     stats: () => ({ ...st }),
   }
 }
