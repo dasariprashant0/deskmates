@@ -77,7 +77,7 @@ describe('draw', () => {
   test('bubble goes through fillText exactly once and is capped; markup stays text', () => {
     const r = recorder()
     const long = '<img src=x onerror=alert(1)> ' + 'x'.repeat(80)
-    drawCharacter(r.ctx, view({ bubble: long }), sprites, cache())
+    drawCharacter(r.ctx, view({ ring: "working", bubble: long }), sprites, cache())
     const texts = r.ops.filter((o) => o.op === 'fillText').map((o) => String(o.args[0]))
     const bubbles = texts.filter((t) => t !== 'ada')
     expect(bubbles).toHaveLength(1)
@@ -165,7 +165,7 @@ describe('label placement', () => {
   const bubble = 'x'.repeat(24)
   test.each([0, VIEW_W, 3, VIEW_W - 3])('bubble and name tag stay inside the view for x=%i', (x) => {
     const r = recorder()
-    drawCharacter(r.ctx, view({ x, y: 80, bubble, name: 'a-long-name-here' }), sprites, cache())
+    drawCharacter(r.ctx, view({ x, y: 80, ring: "working", bubble, name: 'a-long-name-here' }), sprites, cache())
     const tags = fills(r.ops).filter((f) => f.color === PAL.bubbleBg || f.color === PAL.tagBg)
     expect(tags).toHaveLength(2)
     for (const t of tags) {
@@ -175,7 +175,7 @@ describe('label placement', () => {
   })
   test('bubble sits above the name tag without overlapping', () => {
     const r = recorder()
-    drawCharacter(r.ctx, view({ x: 160, y: 80, bubble: 'hello' }), sprites, cache())
+    drawCharacter(r.ctx, view({ x: 160, y: 80, ring: "working", bubble: 'hello' }), sprites, cache())
     const f = fills(r.ops)
     const b = f.find((t) => t.color === PAL.bubbleBg)
     const n = f.find((t) => t.color === PAL.tagBg)
@@ -183,13 +183,13 @@ describe('label placement', () => {
   })
   test('near the top the bubble moves below the feet instead of clipping', () => {
     const r = recorder()
-    drawCharacter(r.ctx, view({ x: 160, y: 30, bubble: 'hello' }), sprites, cache())
+    drawCharacter(r.ctx, view({ x: 160, y: 30, ring: "working", bubble: 'hello' }), sprites, cache())
     const b = fills(r.ops).find((t) => t.color === PAL.bubbleBg)
     expect(b?.y).toBeGreaterThanOrEqual(0)
   })
   test('colliding characters get non-overlapping labels', () => {
     const r = recorder()
-    drawCharacters(r.ctx, [view({ key: 'a', name: 'aa', x: 100, y: 80, bubble: 'one' }), view({ key: 'b', name: 'bb', x: 104, y: 82, bubble: 'two' })], sprites, cache())
+    drawCharacters(r.ctx, [view({ key: 'a', name: 'aa', x: 100, y: 80, ring: "working", bubble: 'one' }), view({ key: 'b', name: 'bb', x: 104, y: 82, ring: "working", bubble: "two" })], sprites, cache())
     const tags = fills(r.ops).filter((f) => f.color === PAL.bubbleBg || f.color === PAL.tagBg)
     expect(tags).toHaveLength(4)
     for (let i = 0; i < tags.length; i++) for (let j = i + 1; j < tags.length; j++) expect(overlap(tags[i] as Fill, tags[j] as Fill)).toBe(false)
@@ -212,5 +212,94 @@ describe('selection and reduced motion', () => {
     const r = recorder()
     drawCharacter(r.ctx, view({ ring: 'needs-you' }), sprites, cache())
     expect(r.ops.filter((o) => o.op === 'fillText' && o.args[0] === '!')).toHaveLength(1)
+  })
+})
+
+// ---- crowding: label layout, badges, bubble rules -------------------------------------------------
+type Drawn = { text: string; bg: unknown; rect: Fill; i: number }
+/** Every label the renderer drew, in draw order: the fillRect of its background and the fillText that follows. */
+const drawn = (ops: Op[]): Drawn[] => {
+  const out: Drawn[] = []
+  let color: unknown
+  let last: { color: unknown; rect: Fill } | undefined
+  ops.forEach((o, i) => {
+    if (o.op === 'set:fillStyle') color = o.args[0]
+    if (o.op === 'fillRect' && (color === PAL.tagBg || color === PAL.bubbleBg)) last = { color, rect: { color, x: o.args[0] as number, y: o.args[1] as number, w: o.args[2] as number, h: o.args[3] as number } }
+    if (o.op === 'fillText' && last && o.args[0] !== '!') { out.push({ text: String(o.args[0]), bg: last.color, rect: last.rect, i }); last = undefined }
+  })
+  return out
+}
+const crowd = (n: number, extra: (i: number) => Partial<CharacterView> = () => ({})): CharacterView[] =>
+  Array.from({ length: n }, (_, i) => view({ key: `k${i}`, name: 'general-purpose', short: `agent #${i + 1}`, x: 150 + (i % 5) * 4, y: 100 + Math.floor(i / 5) * 5, ...extra(i) }))
+
+describe('crowded labels', () => {
+  test('16 characters stacked within 20 px: no two drawn label rects overlap and all stay inside the view', () => {
+    const r = recorder()
+    drawCharacters(r.ctx, crowd(16, (i) => ({ ring: 'working', bubble: `tool ${i}` })), sprites, cache())
+    const d = drawn(r.ops)
+    expect(d.length).toBeGreaterThan(4)
+    for (let i = 0; i < d.length; i++) {
+      const a = (d[i] as Drawn).rect
+      expect(a.x).toBeGreaterThanOrEqual(0)
+      expect(a.x + a.w).toBeLessThanOrEqual(VIEW_W)
+      for (let j = i + 1; j < d.length; j++) expect(overlap(a, (d[j] as Drawn).rect)).toBe(false)
+    }
+  })
+
+  test('when the full tag cannot be placed a compact #n badge is drawn instead', () => {
+    const r = recorder()
+    drawCharacters(r.ctx, crowd(16), sprites, cache())
+    const texts = drawn(r.ops).map((d) => d.text)
+    expect(texts.some((t) => /^#\d+$/.test(t))).toBe(true)
+    expect(texts.some((t) => t.startsWith('agent #'))).toBe(true)
+  })
+
+  test('a lone character gets its full tag and no badge', () => {
+    const r = recorder()
+    drawCharacters(r.ctx, [view({ short: 'agent #2' })], sprites, cache())
+    expect(drawn(r.ops).map((d) => d.text)).toEqual(['agent #2'])
+  })
+
+  test('selected and hovered labels are full and drawn last, even in a crowd', () => {
+    const r = recorder()
+    drawCharacters(r.ctx, crowd(16), sprites, cache(), { selectedKey: 'k0', hoveredKey: 'k7' })
+    const d = drawn(r.ops)
+    expect(d.slice(-2).map((x) => x.text)).toEqual(['agent #1', 'agent #8'])
+    for (let i = 0; i < d.length; i++) for (let j = i + 1; j < d.length; j++) expect(overlap((d[i] as Drawn).rect, (d[j] as Drawn).rect)).toBe(false)
+  })
+
+  test('selected label is last even when it sorts first', () => {
+    const r = recorder()
+    drawCharacters(r.ctx, [view({ key: 'top', name: 'top', y: 40 }), view({ key: 'bot', name: 'bot', y: 120 })], sprites, cache(), { selectedKey: 'top' })
+    expect(drawn(r.ops).map((d) => d.text)).toEqual(['bot', 'top'])
+  })
+
+  test('idle characters never get a bubble; the selected one does', () => {
+    const idle = recorder()
+    drawCharacters(idle.ctx, [view({ bubble: 'Read: x', ring: 'idle' }), view({ key: 'd', bubble: 'Read: y', ring: 'done', y: 100 }), view({ key: 'n', bubble: 'Read: z', ring: 'needs-you', y: 120 })], sprites, cache())
+    expect(drawn(idle.ops).filter((d) => d.bg === PAL.bubbleBg)).toHaveLength(0)
+    const sel = recorder()
+    drawCharacters(sel.ctx, [view({ bubble: 'Read: x', ring: 'idle' })], sprites, cache(), { selectedKey: 'k' })
+    expect(drawn(sel.ops).filter((d) => d.bg === PAL.bubbleBg).map((d) => d.text)).toEqual(['Read: x'])
+  })
+
+  test('at most 6 bubbles; the ones farthest from the selection are dropped and the selection keeps its own', () => {
+    const views = Array.from({ length: 12 }, (_, i) => view({ key: `k${i}`, name: `n${i}`, x: 20 + i * 24, y: 90, ring: 'working', bubble: `b${i}` }))
+    const r = recorder()
+    drawCharacters(r.ctx, views, sprites, cache(), { selectedKey: 'k0' })
+    const b = drawn(r.ops).filter((d) => d.bg === PAL.bubbleBg).map((d) => d.text).sort()
+    expect(b).toHaveLength(6)
+    expect(b).toEqual(['b0', 'b1', 'b2', 'b3', 'b4', 'b5'])
+    const none = recorder()
+    drawCharacters(none.ctx, views, sprites, cache())
+    expect(drawn(none.ops).filter((d) => d.bg === PAL.bubbleBg)).toHaveLength(6)
+  })
+
+  test('fade is applied per label', () => {
+    const r = recorder()
+    drawCharacters(r.ctx, [view({ fade: 0.5 })], sprites, cache())
+    const i = r.ops.findIndex((o) => o.op === 'fillText')
+    const alpha = r.ops.slice(0, i).filter((o) => o.op === 'set:globalAlpha').at(-1)?.args[0]
+    expect(alpha).toBe(0.5)
   })
 })

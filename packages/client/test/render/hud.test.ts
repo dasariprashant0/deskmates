@@ -130,3 +130,27 @@ describe('ring contrast', () => {
     expect(contrast(color as string, floor as string)).toBeGreaterThanOrEqual(3)
   })
 })
+
+describe('drawHud hidden count', () => {
+  const base = summarize(office(mk('a')), EXAMPLE_PRICES, true, 0)
+  test('shows +N idle only when something is hidden', () => {
+    const none = recorder()
+    drawHud(none.ctx, base, box, 1)
+    expect(texts(none.ops).join(' ')).not.toContain('idle')
+    const some = recorder()
+    drawHud(some.ctx, { ...base, hidden: 12 }, box, 1)
+    expect(texts(some.ops)).toContain('+12 idle')
+  })
+  test('narrow boxes shorten it to +N and it still fits at 480 px', () => {
+    const r = recorder()
+    drawHud(r.ctx, { ...base, hidden: 12 }, { x: 0, y: 0, w: 480, h: 32 }, 1)
+    for (const o of r.ops.filter((x) => x.op === 'fillText')) expect(Number(o.args[1]) + String(o.args[0]).length * 7).toBeLessThanOrEqual(480)
+    expect(texts(r.ops).join(' ')).toMatch(/\+12/)
+  })
+  test('chips use the short numbered name', () => {
+    const s = summarize(office(mk('a', { status: 'waiting', attention: { toolUseId: 'x', source: 'hook', since: 1 }, cwd: '/w/proj', startedAt: 1 }), mk('b', { cwd: '/w/proj', startedAt: 2 })), EXAMPLE_PRICES, true, 0)
+    const r = recorder()
+    drawHud(r.ctx, s, box, 1)
+    expect(texts(r.ops)).toContain('proj #1')
+  })
+})

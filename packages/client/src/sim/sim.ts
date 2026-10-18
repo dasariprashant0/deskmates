@@ -1,20 +1,33 @@
 import type { AgentState, OfficeState } from '@deskmates/core'
 import type { Anim, Dir } from '@deskmates/sprites'
 import {
-  BLOCK_MS, CELEBRATE_MS, DWELL_MS, LEAVE_FADE_MS, SIDESTEP_HOLD_MS, SPEED_PX_PER_S, STEP_MS, TELEPORT_FADE_MS,
-  deriveName, frameAt, intentFor,
+  ACTIVE_WINDOW_MS, BLOCK_MS, CELEBRATE_MS, DWELL_MS, LEAVE_FADE_MS, MAX_VISIBLE, MAX_VISIBLE_ALL, SIDESTEP_HOLD_MS, SPEED_PX_PER_S, STEP_MS,
+  TELEPORT_FADE_MS, deriveName, frameAt, intentFor, isLive,
   type CharacterView, type Intent, type Ring,
 } from './character'
+import { labelAgents } from '../hud/labels'
 import { defaultLayout, TILE, tilePx, type Layout, type Tile, type ZoneId } from './layout'
 import { findPath, tileKey } from './path'
 import { createRng, type Rng } from './rng'
 import { SlotTable } from './zones'
 
-export type SimOptions = { layout?: Layout; reducedMotion?: boolean; seed?: string }
+export type SimOptions = {
+  layout?: Layout
+  reducedMotion?: boolean
+  seed?: string
+  /** Agents that are not live get a character only this long after their last event. Default ACTIVE_WINDOW_MS. */
+  activeWindowMs?: number
+  /** Most simultaneous characters. Default MAX_VISIBLE. */
+  maxVisible?: number
+}
 export type Sim = {
   sync(state: OfficeState, nowMs: number): void
   step(dtMs: number): void
   characters(): CharacterView[]
+  /** Agents in the state (not ended) that have no character because they are idle, old or over the cap. */
+  hiddenCount(): number
+  /** true: every agent is eligible and the cap rises to MAX_VISIBLE_ALL; false: back to the options' values. */
+  setShowAll(on: boolean): void
 }
 
 type Where = ZoneId | 'desk'
@@ -28,6 +41,8 @@ type Char = {
   rng: Rng
   phase: number
   name: string
+  short: string
+  full: string
   state: AgentState
   spawned: boolean
   tile: Tile
@@ -74,6 +89,11 @@ export function createSim(opts: SimOptions = {}): Sim {
   const reduced = opts.reducedMotion ?? false
   const seed = opts.seed ?? 'deskmates'
   const table = new SlotTable(layout)
+  const baseWindow = opts.activeWindowMs ?? ACTIVE_WINDOW_MS
+  const baseCap = opts.maxVisible ?? MAX_VISIBLE
+  let windowMs = baseWindow
+  let cap = baseCap
+  let hidden = 0
 
   let chars: Char[] = []
   const byKey = new Map<string, Char>()
@@ -196,7 +216,7 @@ export function createSim(opts: SimOptions = {}): Sim {
   const create = (a: AgentState): Char => {
     const rng = createRng(`${seed}:${a.key}`)
     const c: Char = {
-      key: a.key, order: orderSeq++, rng, phase: Math.floor(rng.next() * 1000), name: deriveName(a), state: a,
+      key: a.key, order: orderSeq++, rng, phase: Math.floor(rng.next() * 1000), name: deriveName(a), short: deriveName(a), full: deriveName(a), state: a,
       spawned: false, tile: layout.doorTile, next: undefined, prog: 0, x: 0, y: 0, dir: 'up', path: [],
       goal: undefined, arrivedId: 0, arrivedAt: 0, zone: undefined, waiting: false, seated: false,
       assign: assignFor(a.key), blockedMs: 0, hold: 0, sidestep: false, planRetryAt: 0, leaving: false,
@@ -458,7 +478,7 @@ export function createSim(opts: SimOptions = {}): Sim {
           ? clamp01(c.tp.phase === 'out' ? 1 - c.tp.t / HALF_TELEPORT : c.tp.t / HALF_TELEPORT)
           : 1
     const v: CharacterView = {
-      key: c.key, name: c.name, x: c.x, y: c.y, dir: c.dir, anim: c.anim, frame: c.frame, ring: c.ring, fade,
+      key: c.key, name: c.name, short: c.short, full: c.full, x: c.x, y: c.y, dir: c.dir, anim: c.anim, frame: c.frame, ring: c.ring, fade,
     }
     if (c.bubble !== undefined) v.bubble = c.bubble
     if (c.zone !== undefined) v.zone = c.zone
@@ -469,23 +489,50 @@ export function createSim(opts: SimOptions = {}): Sim {
     sync(state, nowMs) {
       syncNow = nowMs
       tSync = t
+      const labels = labelAgents(state)
       const seen = new Set<string>()
+      const cands: AgentState[] = []
+      let nonEnded = 0
       // core reduce only ever adds an agent together with its `order` entry, so `order` covers every agent.
       for (const key of state.order) {
         const a = state.agents[key]
         if (!a || seen.has(key)) continue
         seen.add(key)
-        let c = byKey.get(key)
-        if (!c) {
-          if (isEnded(a)) continue
-          c = create(a)
-        } else {
+        const c = byKey.get(key)
+        if (c) {
           c.state = a
           c.name = deriveName(a)
+          const l = labels.get(key)
+          c.short = l?.short ?? c.name
+          c.full = l?.full ?? c.name
         }
-        if (isEnded(a)) startLeaving(c)
+        if (isEnded(a)) {
+          if (c) startLeaving(c)
+          continue
+        }
+        nonEnded++
+        if (isLive(a) || nowMs - a.lastEventAt <= windowMs) cands.push(a)
+        else if (c) startLeaving(c)
       }
       for (const c of chars) if (!seen.has(c.key)) startLeaving(c)
+      // Live agents first, then the most recent; the sort is stable so ties keep state order.
+      cands.sort((x, y) => Number(isLive(y)) - Number(isLive(x)) || y.lastEventAt - x.lastEventAt)
+      let kept = 0
+      for (const a of cands) {
+        const c = byKey.get(a.key)
+        if (c?.leaving) continue
+        if (kept >= cap) {
+          if (c) startLeaving(c)
+          continue
+        }
+        kept++
+        if (!c && chars.length < cap) {
+          const l = labels.get(a.key)
+          const n = create(a)
+          n.short = l?.short ?? n.name
+          n.full = l?.full ?? n.name
+        }
+      }
       for (const c of chars) if (!c.spawned && !c.leaving) trySpawn(c)
       // Clean up anything that left before it ever spawned.
       if (chars.some((c) => c.leaving && !c.spawned)) {
@@ -495,6 +542,7 @@ export function createSim(opts: SimOptions = {}): Sim {
           return !gone
         })
       }
+      hidden = Math.max(0, nonEnded - chars.reduce((n, c) => n + (c.leaving ? 0 : 1), 0))
     },
     step(dtMs) {
       acc += dtMs
@@ -505,6 +553,11 @@ export function createSim(opts: SimOptions = {}): Sim {
     },
     characters() {
       return chars.filter((c) => c.spawned).map(view)
+    },
+    hiddenCount: () => hidden,
+    setShowAll(on) {
+      windowMs = on ? Infinity : baseWindow
+      cap = on ? Math.max(baseCap, MAX_VISIBLE_ALL) : baseCap
     },
   }
 }

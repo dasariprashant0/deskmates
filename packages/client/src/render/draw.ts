@@ -237,44 +237,124 @@ export function drawRing(c: Ctx2D, ring: Ring, x: number, y: number): void {
 const SPRITE_W = 16
 const SPRITE_H = 24
 const MARGIN = 2
-const TAG_H = 10
-const TAG_STEP = 11
+const TAG_H = 9
+/** Vertical step between label candidates, in view px; equal to TAG_H so stacked tags touch but never overlap. */
+const STEP = 9
+export const MAX_BUBBLES = 6
 
-export type DrawOpts = { selectedKey?: string }
+export type DrawOpts = { selectedKey?: string; hoveredKey?: string }
 type Rect = { x: number; y: number; w: number; h: number }
+type Label = { r: Rect; text: string; bg: string; fg: string; alpha: number }
 const hit = (a: Rect, b: Rect): boolean => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
+const clampX = (cx: number, w: number): number => Math.max(MARGIN, Math.min(Math.round(cx - w / 2), VIEW_W - MARGIN - w))
+const BASE = (by: number): number => by - 7 // rect top for a text baseline
+
+/** The '#n' of a numbered tag, else the first two letters of the name. */
+const badgeText = (v: CharacterView): string => {
+  const m = /#(\d+)$/.exec(v.short ?? '')
+  return m ? `#${m[1]}` : Array.from(v.name).slice(0, 2).join('').toUpperCase()
+}
+
+const isLiveRing = (v: CharacterView): boolean => v.ring === 'working' || v.ring === 'thinking'
+
+/** At most MAX_BUBBLES bubbles: live characters and the selected one; the rest are dropped farthest-from-selection first. */
+function bubbleKeys(views: readonly CharacterView[], selectedKey: string | undefined): Set<string> {
+  const sel = views.find((v) => v.key === selectedKey)
+  const pool = views.filter((v) => v.bubble && v !== sel && isLiveRing(v))
+  const d = (v: CharacterView): number => (sel ? Math.hypot(v.x - sel.x, v.y - sel.y) : 0)
+  pool.sort((a, b) => d(a) - d(b) || b.y - a.y || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
+  const keep = pool.slice(0, MAX_BUBBLES - (sel?.bubble ? 1 : 0))
+  if (sel?.bubble) keep.push(sel)
+  return new Set(keep.map((v) => v.key))
+}
 
 /**
- * Draws a tag whose rect stays 2 px inside the view horizontally and never overlaps an already placed tag
- * (it steps by `dir` * 11 px until free). Returns the rect it used.
+ * Places every label in one pass over `sorted` (y, then x). A tag goes above the head; when that collides it tries
+ * three steps higher, then below the feet, and finally shrinks to a '#n' badge that searches further (or is skipped).
+ * Selected and hovered characters are placed first, always get their full text, and are drawn last, on top.
  */
-function placeTag(c: Ctx2D, text: string, cx: number, baseY: number, dir: 1 | -1, placed: Rect[], bg: string, fg: string): Rect {
+function layoutLabels(c: Ctx2D, sorted: readonly CharacterView[], o: DrawOpts): Label[] {
+  c.font = '8px monospace'
+  const placed: Rect[] = []
+  const rest: Label[] = []
+  const top: Label[] = []
+  const bubbles = bubbleKeys(sorted, o.selectedKey)
+  const rectFor = (text: string, cx: number, by: number): Rect => {
+    const w = Math.ceil(measure(c, text)) + 4
+    return { x: clampX(cx, w), y: BASE(by), w, h: TAG_H }
+  }
+  const free = (r: Rect): boolean => r.y >= 0 && r.y + r.h <= VIEW_H && !placed.some((p) => hit(p, r))
+  const first = (text: string, cx: number, bys: number[]): Rect | undefined => {
+    for (const by of bys) {
+      const r = rectFor(text, cx, by)
+      if (free(r)) return r
+    }
+    return undefined
+  }
+  const add = (out: Label[], r: Rect, text: string, bg: string, fg: string, alpha: number): void => {
+    placed.push(r)
+    out.push({ r, text, bg, fg, alpha })
+  }
+  const place = (v: CharacterView, focus: boolean): void => {
+    const x = Math.round(v.x)
+    const y = Math.round(v.y)
+    const out = focus ? top : rest
+    const head = y - SPRITE_H - 1
+    const text = v.short ?? v.name
+    let tag = first(text, x, [head, head - STEP, head - 2 * STEP, head - 3 * STEP, y + 11])
+    let shown: Rect | undefined
+    if (tag) shown = tag
+    else if (focus) {
+      tag = rectFor(text, x, head)
+      tag.y = Math.max(0, Math.min(tag.y, VIEW_H - TAG_H))
+      shown = tag
+    } else {
+      const b = badgeText(v)
+      const far = [head, ...Array.from({ length: 9 }, (_, i) => head - (i + 1) * STEP), ...Array.from({ length: 5 }, (_, i) => y + 11 + i * STEP)]
+      const br = first(b, x, far)
+      if (br) {
+        add(out, br, b, PAL.tagBg, PAL.text, v.fade)
+        return
+      }
+    }
+    if (shown) add(out, shown, text, PAL.tagBg, PAL.text, v.fade)
+    if (v.bubble && bubbles.has(v.key)) {
+      const bt = clipBubble(v.bubble)
+      const above = (shown ? shown.y : head - 6) - 3
+      const bys = [above, above - STEP, above - 2 * STEP, y + 14, y + 14 + STEP, y + 14 + 2 * STEP]
+      let r = first(bt, x, bys)
+      if (!r && v.key === o.selectedKey) {
+        r = rectFor(bt, x, above)
+        r.y = Math.max(0, Math.min(r.y, VIEW_H - TAG_H))
+      }
+      if (r) add(out, r, bt, PAL.bubbleBg, PAL.bubbleText, v.fade)
+    }
+  }
+  const focusKeys = [o.selectedKey, o.hoveredKey]
+  const focus = new Set<string>()
+  for (const k of focusKeys) {
+    const v = sorted.find((q) => q.key === k)
+    if (v && !focus.has(v.key)) {
+      focus.add(v.key)
+      place(v, true)
+    }
+  }
+  for (const v of sorted) if (!focus.has(v.key)) place(v, false)
+  return [...rest, ...top]
+}
+
+function drawLabels(c: Ctx2D, sorted: readonly CharacterView[], o: DrawOpts): void {
+  if (sorted.length === 0) return
+  const labels = layoutLabels(c, sorted, o)
+  if (labels.length === 0) return
   c.font = '8px monospace'
   c.textAlign = 'center'
   c.textBaseline = 'alphabetic'
-  const w = Math.ceil(measure(c, text)) + 4
-  const x = Math.max(MARGIN, Math.min(Math.round(cx - w / 2), VIEW_W - MARGIN - w))
-  let by = baseY
-  for (let i = 0; i < 8 && placed.some((p) => hit(p, { x, y: by - 8, w, h: TAG_H })); i++) by += dir * TAG_STEP
-  const r = { x, y: by - 8, w, h: TAG_H }
-  rect(c, bg, r.x, r.y, r.w, r.h)
-  c.fillStyle = fg
-  c.fillText(text, r.x + w / 2, by)
-  placed.push(r)
-  return r
-}
-
-/** Name tag above the head, speech bubble above the tag (below the feet when there is no room above). */
-function drawLabels(c: Ctx2D, v: CharacterView, placed: Rect[]): void {
-  const x = Math.round(v.x)
-  const y = Math.round(v.y)
-  c.globalAlpha = v.fade
-  const tag = placeTag(c, v.name, x, y - SPRITE_H - 1, -1, placed, PAL.tagBg, PAL.text)
-  if (v.bubble) {
-    const text = clipBubble(v.bubble)
-    const above = tag.y - 3
-    if (above - 8 >= MARGIN) placeTag(c, text, x, above, -1, placed, PAL.bubbleBg, PAL.bubbleText)
-    else placeTag(c, text, x, y + 14, 1, placed, PAL.bubbleBg, PAL.bubbleText)
+  for (const l of labels) {
+    c.globalAlpha = l.alpha
+    rect(c, l.bg, l.r.x, l.r.y, l.r.w, l.r.h)
+    c.fillStyle = l.fg
+    c.fillText(l.text, l.r.x + l.r.w / 2, l.r.y + 7)
   }
   c.globalAlpha = 1
 }
@@ -309,15 +389,14 @@ function drawBody(c: Ctx2D, v: CharacterView, sprites: Sprites, cache: BitmapCac
 
 export function drawCharacter(c: Ctx2D, v: CharacterView, sprites: Sprites, cache: BitmapCache, o: DrawOpts = {}): void {
   drawBody(c, v, sprites, cache, o)
-  drawLabels(c, v, [])
+  drawLabels(c, [v], o)
 }
 
 /** Bodies back to front, then all labels on top so no sprite covers a name or bubble. */
 export function drawCharacters(c: Ctx2D, views: readonly CharacterView[], sprites: Sprites, cache: BitmapCache, o: DrawOpts = {}): void {
-  const sorted = [...views].sort((a, b) => a.y - b.y)
+  const sorted = [...views].sort((a, b) => a.y - b.y || a.x - b.x)
   for (const v of sorted) drawBody(c, v, sprites, cache, o)
-  const placed: Rect[] = []
-  for (const v of sorted) drawLabels(c, v, placed)
+  drawLabels(c, sorted, o)
 }
 
 export function drawScene(c: Ctx2D, layout: Layout, views: readonly CharacterView[], sprites: Sprites, cache: BitmapCache, o: DrawOpts = {}): void {

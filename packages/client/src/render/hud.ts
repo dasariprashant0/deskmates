@@ -40,11 +40,12 @@ type Level = 0 | 1 | 2
  * The stats row at three widths: 0 full words, 1 abbreviated counts ('2w 1t 1! 0x') with tokens, 2 counts and cost only.
  * Errors and cost are in every level.
  */
-function items(t: Totals, level: Level, u: number): Item[] {
+function items(t: Totals, level: Level, u: number, hidden: number): Item[] {
   const counts: [Kind, number, string, string][] = [['working', t.running, 'working', 'w'], ['thinking', t.thinking, 'thinking', 't'], ['needs', t.needsYou, 'needs you', '!'], ['error', t.errors, 'errors', 'x']]
   const out: Item[] = counts.map(([kind, n, long, short]) => ({ kind, text: level === 0 ? `${n} ${long}` : `${n}${short}`, color: HUD.text, lead: 0 }))
   if (level < 2) out.push({ text: `${formatTokens(t.tokens)}${level === 0 ? ' tokens' : ' tok'}`, color: HUD.text, lead: 0 })
   out.push({ text: `${level === 0 ? 'cost ' : ''}${formatCost({ usd: t.usd, known: true })}${t.partialCost ? '+' : ''}`, color: HUD.text, lead: 0 })
+  if (hidden > 0) out.push({ text: level === 0 ? `+${hidden} idle` : `+${hidden}`, color: HUD.dim, lead: 0 })
   if (t.anyExample) out.push({ text: level === 0 ? 'example prices' : '(ex)', color: HUD.dim, lead: Math.round(6 * u) })
   return out
 }
@@ -69,10 +70,11 @@ export function drawHud(c: Ctx2D, s: Summary, box: Box, unit: number, selectedKe
   const right = box.x + box.w - pad
   const markerW = Math.round(14 * u)
   const width = (list: Item[]): number => list.reduce((w, i) => w + i.lead + (i.kind ? markerW : 0) + Math.ceil(measure(c, i.text)) + pad, 0)
-  let row = items(s.totals, 0, u)
+  const hiddenN = s.hidden ?? 0
+  let row = items(s.totals, 0, u, hiddenN)
   for (const level of [1, 2] as const) {
     if (left + width(row) - pad <= right) break
-    row = items(s.totals, level, u)
+    row = items(s.totals, level, u, hiddenN)
   }
   let x = left
   for (const i of row) {
@@ -93,7 +95,7 @@ export function drawHud(c: Ctx2D, s: Summary, box: Box, unit: number, selectedKe
   const reserve = Math.ceil(measure(c, '+99')) + pad
   let shown = 0
   for (const r of s.needsYou.slice(0, MAX_CHIPS)) {
-    const label = `${clip(r.name, 10)}${r.status === 'maybe waiting' ? ' (maybe waiting)' : ''}`
+    const label = `${clip(r.short, 10)}${r.status === 'maybe waiting' ? ' (maybe waiting)' : ''}`
     const w = Math.ceil(measure(c, label)) + Math.round(26 * u)
     const more = s.needsYou.length - shown - 1
     if (x + w + (more > 0 ? reserve : 0) > right) break

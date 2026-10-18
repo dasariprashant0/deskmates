@@ -20,6 +20,10 @@ export type CharacterView = {
   zone?: ZoneId | 'desk'
   /** 0..1 opacity (reduced-motion teleports and leaving). */
   fade: number
+  /** Name tag text (abbreviated, numbered when siblings share a name). Falls back to `name`. */
+  short?: string
+  /** Full numbered name for the card and lists. */
+  full?: string
 }
 
 // Timing constants (ms unless noted).
@@ -35,6 +39,11 @@ export const LEAVE_FADE_MS = 500
 export const TELEPORT_FADE_MS = 150
 export const BUBBLE_MAX = 24
 export const NAME_MAX = 16
+/** An agent without a live status still gets a character this long after its last event. */
+export const ACTIVE_WINDOW_MS = 5 * 60_000
+/** Most characters at once (desks + hot desks + queue tiles); 'show all' raises it. */
+export const MAX_VISIBLE = 16
+export const MAX_VISIBLE_ALL = 40
 
 // Sprite frame counts, mirrored from the sprites package (not imported on purpose).
 export const FRAME_COUNTS: Record<Anim, number> = {
@@ -57,6 +66,9 @@ export function clipBubble(s: string): string {
 }
 
 const basename = (p: string | undefined): string => p?.split(/[\\/]/).filter(Boolean).pop() ?? ''
+
+/** Working, thinking or waiting on the user: always worth showing. */
+export const isLive = (s: AgentState): boolean => s.status === 'working' || s.status === 'thinking' || s.status === 'waiting' || s.attention !== undefined
 
 /** Project folder for a main agent, agentType for a subagent, else the session id's first 6 chars. */
 export function deriveName(s: AgentState): string {
