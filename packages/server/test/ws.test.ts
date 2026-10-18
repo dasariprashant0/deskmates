@@ -299,7 +299,7 @@ describe('backpressure and heartbeat', () => {
       await new Promise((r) => setTimeout(r, 15))
     }
     expect(hub.stats().droppedSlow).toBe(1)
-    expect(hub.stats().clients).toBe(1)
+    await until(() => hub.stats().clients === 1) // terminate() closes asynchronously
     const seen = batches(good).length
     pub('still-here')
     await until(() => batches(good).length > seen)
