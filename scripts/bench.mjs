@@ -4,7 +4,8 @@
 //   node scripts/bench.mjs [--seconds 60] [--sessions 50] [--max-cpu 5] [--max-rss-mb 150]
 //
 // Everything (server, writer and both clients) runs in THIS process, so CPU and RSS are an upper bound for the
-// server alone. Exit code 1 when mean CPU % > --max-cpu or max RSS > --max-rss-mb. Prints one JSON object.
+// server alone. Exit code 1 when mean CPU % > --max-cpu, max RSS > --max-rss-mb, any client was dropped, any frame was invalid,
+// any seq gap was seen, or any client received no events. Prints one JSON object.
 // Bundling: the packages are TypeScript-only, so scripts/_bundle.mjs bundles them with esbuild into $TMPDIR.
 import { appendFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -102,6 +103,8 @@ try {
     budget: { maxCpuPct: maxCpu, maxRssMB },
   }
   result.pass = result.cpuMeanPct <= maxCpu && result.rssMB.max <= maxRssMB
+    && result.droppedClients === 0 && result.invalidFrames === 0 && result.seqGaps === 0
+    && result.clientEvents.every((e) => e > 0) // a silent or stalled client must fail the run
   console.log(JSON.stringify(result))
   if (!result.pass) process.exitCode = 1
 } catch (e) {
