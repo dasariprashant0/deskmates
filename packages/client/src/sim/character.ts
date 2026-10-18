@@ -24,6 +24,8 @@ export type CharacterView = {
   short?: string
   /** Full numbered name for the card and lists. */
   full?: string
+  /** Sprite seed: the plain name for the first of a name, `name #n` for its siblings. Falls back to `name`. */
+  look?: string
 }
 
 // Timing constants (ms unless noted).

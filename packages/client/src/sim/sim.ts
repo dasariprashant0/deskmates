@@ -5,7 +5,7 @@ import {
   TELEPORT_FADE_MS, deriveName, frameAt, intentFor, isLive,
   type CharacterView, type Intent, type Ring,
 } from './character'
-import { labelAgents } from '../hud/labels'
+import { createLabeler, type AgentLabel } from '../hud/labels'
 import { defaultLayout, TILE, tilePx, type Layout, type Tile, type ZoneId } from './layout'
 import { findPath, tileKey } from './path'
 import { createRng, type Rng } from './rng'
@@ -19,6 +19,8 @@ export type SimOptions = {
   activeWindowMs?: number
   /** Most simultaneous characters. Default MAX_VISIBLE. */
   maxVisible?: number
+  /** Shared with the summary so both number siblings alike. Default: a private one. */
+  labeler?: (state: OfficeState) => Map<string, AgentLabel>
 }
 export type Sim = {
   sync(state: OfficeState, nowMs: number): void
@@ -43,6 +45,7 @@ type Char = {
   name: string
   short: string
   full: string
+  look: string
   state: AgentState
   spawned: boolean
   tile: Tile
@@ -89,6 +92,7 @@ export function createSim(opts: SimOptions = {}): Sim {
   const reduced = opts.reducedMotion ?? false
   const seed = opts.seed ?? 'deskmates'
   const table = new SlotTable(layout)
+  const labelOf = opts.labeler ?? createLabeler()
   const baseWindow = opts.activeWindowMs ?? ACTIVE_WINDOW_MS
   const baseCap = opts.maxVisible ?? MAX_VISIBLE
   let windowMs = baseWindow
@@ -216,7 +220,7 @@ export function createSim(opts: SimOptions = {}): Sim {
   const create = (a: AgentState): Char => {
     const rng = createRng(`${seed}:${a.key}`)
     const c: Char = {
-      key: a.key, order: orderSeq++, rng, phase: Math.floor(rng.next() * 1000), name: deriveName(a), short: deriveName(a), full: deriveName(a), state: a,
+      key: a.key, order: orderSeq++, rng, phase: Math.floor(rng.next() * 1000), name: deriveName(a), short: deriveName(a), full: deriveName(a), look: deriveName(a), state: a,
       spawned: false, tile: layout.doorTile, next: undefined, prog: 0, x: 0, y: 0, dir: 'up', path: [],
       goal: undefined, arrivedId: 0, arrivedAt: 0, zone: undefined, waiting: false, seated: false,
       assign: assignFor(a.key), blockedMs: 0, hold: 0, sidestep: false, planRetryAt: 0, leaving: false,
@@ -478,7 +482,7 @@ export function createSim(opts: SimOptions = {}): Sim {
           ? clamp01(c.tp.phase === 'out' ? 1 - c.tp.t / HALF_TELEPORT : c.tp.t / HALF_TELEPORT)
           : 1
     const v: CharacterView = {
-      key: c.key, name: c.name, short: c.short, full: c.full, x: c.x, y: c.y, dir: c.dir, anim: c.anim, frame: c.frame, ring: c.ring, fade,
+      key: c.key, name: c.name, short: c.short, full: c.full, look: c.look, x: c.x, y: c.y, dir: c.dir, anim: c.anim, frame: c.frame, ring: c.ring, fade,
     }
     if (c.bubble !== undefined) v.bubble = c.bubble
     if (c.zone !== undefined) v.zone = c.zone
@@ -489,7 +493,7 @@ export function createSim(opts: SimOptions = {}): Sim {
     sync(state, nowMs) {
       syncNow = nowMs
       tSync = t
-      const labels = labelAgents(state)
+      const labels = labelOf(state)
       const seen = new Set<string>()
       const cands: AgentState[] = []
       let nonEnded = 0
@@ -505,6 +509,7 @@ export function createSim(opts: SimOptions = {}): Sim {
           const l = labels.get(key)
           c.short = l?.short ?? c.name
           c.full = l?.full ?? c.name
+          c.look = l?.look ?? c.name
         }
         if (isEnded(a)) {
           if (c) startLeaving(c)
@@ -531,6 +536,7 @@ export function createSim(opts: SimOptions = {}): Sim {
           const n = create(a)
           n.short = l?.short ?? n.name
           n.full = l?.full ?? n.name
+          n.look = l?.look ?? n.name
         }
       }
       for (const c of chars) if (!c.spawned && !c.leaving) trySpawn(c)

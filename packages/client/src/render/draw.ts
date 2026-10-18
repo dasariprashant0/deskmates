@@ -380,9 +380,10 @@ function drawBody(c: Ctx2D, v: CharacterView, sprites: Sprites, cache: BitmapCac
   c.ellipse(x, y - 1, 6, 2.5, 0, 0, Math.PI * 2)
   c.fill()
   drawRing(c, v.ring, x, y)
-  const frames = sprites.get(v.name).frames[`${v.anim}:${v.dir}`]
+  const look = v.look ?? v.name
+  const frames = sprites.get(look).frames[`${v.anim}:${v.dir}`]
   const f = frames?.[v.frame % (frames.length || 1)]
-  if (f) c.drawImage(cache.get(v.name, v.anim, v.dir, v.frame, f), x - SPRITE_W / 2, y - SPRITE_H + 1)
+  if (f) c.drawImage(cache.get(look, v.anim, v.dir, v.frame, f), x - SPRITE_W / 2, y - SPRITE_H + 1)
   if (o.selectedKey !== undefined && o.selectedKey === v.key) drawSelection(c, x, y)
   c.globalAlpha = 1
 }

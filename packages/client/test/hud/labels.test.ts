@@ -1,6 +1,7 @@
 import type { AgentState, OfficeState } from '@deskmates/core'
 import { describe, expect, test } from 'vitest'
-import { abbreviate, labelAgents } from '../../src/hud/labels'
+import { generateSprite, hashSheet } from '@deskmates/sprites'
+import { abbreviate, createLabeler, labelAgents } from '../../src/hud/labels'
 import { NAME_MAX } from '../../src/sim/character'
 
 const main = (sid: string, cwd: string, startedAt = 0): AgentState => ({
@@ -15,7 +16,7 @@ const office = (...a: AgentState[]): OfficeState => ({ agents: Object.fromEntrie
 describe('labelAgents', () => {
   test('unique names carry no number', () => {
     const m = labelAgents(office(main('a', '/w/alpha'), main('b', '/w/beta')))
-    expect(m.get('t:a:main')).toEqual({ short: 'alpha', full: 'alpha' })
+    expect(m.get('t:a:main')).toEqual({ short: 'alpha', full: 'alpha', look: 'alpha' })
     expect(m.get('t:b:main')?.full).toBe('beta')
   })
 
@@ -64,5 +65,79 @@ describe('labelAgents', () => {
   test('abbreviate shortens only known long names', () => {
     expect(abbreviate('general-purpose')).toBe('agent')
     expect(abbreviate('deskmates')).toBe('deskmates')
+  })
+
+  describe('sticky labeler', () => {
+    const subs = (...ids: [string, number][]) => ids.map(([id, t]) => sub('s', id, 'general-purpose', t))
+    const full = (m: Map<string, { full: string }>, id: string) => m.get(`t:s:${id}`)?.full
+
+    test('an ordinal survives an earlier sibling leaving state', () => {
+      const [a, b, c] = subs(['a', 1], ['b', 2], ['c', 3])
+      const label = createLabeler()
+      label(office(a!, b!, c!))
+      const m = label(office(b!, c!))
+      expect(full(m, 'b')).toBe('general-purpose #2')
+      expect(full(m, 'c')).toBe('general-purpose #3')
+    })
+
+    test('a new sibling takes the lowest freed ordinal', () => {
+      const [a, b, c] = subs(['a', 1], ['b', 2], ['c', 3])
+      const d = sub('s', 'd', 'general-purpose', 4)
+      const label = createLabeler()
+      label(office(a!, b!, c!))
+      label(office(b!, c!))
+      const m = label(office(b!, c!, d))
+      expect(full(m, 'd')).toBe('general-purpose #1')
+      expect(full(m, 'b')).toBe('general-purpose #2')
+    })
+
+    test('an ended sibling that stays in state keeps its ordinal, a departed one frees it', () => {
+      const [a, b] = subs(['a', 1], ['b', 2])
+      const label = createLabeler()
+      label(office(a!, b!))
+      const e = sub('s', 'e', 'general-purpose', 5)
+      expect(full(label(office(a!, b!, e)), 'e')).toBe('general-purpose #3')
+      expect(full(label(office(b!, e)), 'e')).toBe('general-purpose #3')
+    })
+
+    test('an initial snapshot is numbered deterministically whatever the order array says', () => {
+      const [a, b, c] = subs(['a', 5], ['b', 5], ['c', 1])
+      const x = createLabeler()(office(a!, b!, c!))
+      const y = createLabeler()(office(c!, b!, a!))
+      expect(Object.fromEntries([...x].map(([k, l]) => [k, l.full]))).toEqual(Object.fromEntries([...y].map(([k, l]) => [k, l.full])))
+      expect(full(x, 'c')).toBe('general-purpose #1')
+      expect(full(x, 'a')).toBe('general-purpose #2')
+      expect(full(x, 'b')).toBe('general-purpose #3')
+    })
+
+    test('a lone agent is plain and its look is its name', () => {
+      const m = createLabeler()(office(sub('s', 'a', 'general-purpose', 1)))
+      expect(m.get('t:s:a')).toEqual({ short: 'agent', full: 'general-purpose', look: 'general-purpose' })
+    })
+
+    test('the first agent keeps its look when a sibling appears; siblings look different', () => {
+      const [a, b, c] = subs(['a', 1], ['b', 2], ['c', 3])
+      const label = createLabeler()
+      expect(label(office(a!)).get(a!.key)?.look).toBe('general-purpose')
+      const m = label(office(a!, b!, c!))
+      expect(m.get(a!.key)?.look).toBe('general-purpose')
+      expect(m.get(b!.key)?.look).toBe('general-purpose #2')
+      expect(m.get(c!.key)?.look).toBe('general-purpose #3')
+      expect(new Set([...m.values()].map((l) => l.look)).size).toBe(3)
+    })
+
+    test('sibling looks generate different sprites', () => {
+      const m = createLabeler()(office(...subs(['a', 1], ['b', 2])))
+      const [l1, l2] = [m.get('t:s:a')!.look, m.get('t:s:b')!.look]
+      expect(hashSheet(generateSprite(l1))).not.toBe(hashSheet(generateSprite(l2)))
+    })
+
+    test('main agents sharing a project name still number by group', () => {
+      const label = createLabeler()
+      const m = label(office(main('b', '/w/proj', 5), main('a', '/w/proj', 1), main('c', '/w/other', 2)))
+      expect(m.get('t:a:main')?.full).toBe('proj #1')
+      expect(m.get('t:b:main')?.full).toBe('proj #2')
+      expect(m.get('t:c:main')).toEqual({ short: 'other', full: 'other', look: 'other' })
+    })
   })
 })
