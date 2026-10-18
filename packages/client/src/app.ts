@@ -2,8 +2,12 @@
 import type { AgentState } from '@deskmates/core'
 import { generateSprite, type Frame, type SpriteSheet } from '@deskmates/sprites'
 import { createDemo, createConnection, createMirror, demoSnapshot, isDemo, readToken, stripFragment, type Mirror, type Status } from './index'
+import { asPriceTable, formatTokens } from './hud/cost'
+import { cycleKey, shortDir, summarize, type AgentRow, type Summary } from './hud/summary'
 import { createBitmapCache, drawScene, type Ctx2D } from './render/draw'
 import { fitScale } from './render/fit'
+import { drawHud, type ChipHit } from './render/hud'
+import { pickCharacter, toView } from './render/pick'
 import { createLoop } from './render/loop'
 import { PAL } from './render/palette'
 import { deriveName, defaultLayout, createSim, VIEW_H, VIEW_W, type Sim } from './sim'
@@ -18,6 +22,14 @@ const agentsEl = el('agents', HTMLElement)
 const liveEl = el('live', HTMLElement)
 const statusEl = el('status', HTMLElement)
 const badgeEl = el('badge', HTMLElement)
+const cardEl = el('card', HTMLElement)
+const cardField = (id: string): HTMLElement => el(id, HTMLElement)
+const cardFields = {
+  name: cardField('card-name'), status: cardField('card-status'), tool: cardField('card-tool'), dir: cardField('card-dir'),
+  model: cardField('card-model'), tokens: cardField('card-tokens'), cost: cardField('card-cost'), elapsed: cardField('card-elapsed'),
+  subs: cardField('card-subs'),
+}
+const cardClose = el('card-close', HTMLButtonElement)
 
 const demo = isDemo(location)
 const token = readToken(location.hash)
@@ -132,6 +144,72 @@ const updateMirror = (now: number): void => {
   }
 }
 
+// ---- selection, agent card, HUD ---------------------------------------------------------------
+const HUD_CSS_H = 32
+let summary: Summary = { agents: [], needsYou: [], totals: { running: 0, thinking: 0, needsYou: 0, errors: 0, tokens: 0, usd: 0, anyExample: false, partialCost: false } }
+let selectedKey: string | undefined
+let hudHits: ChipHit[] = []
+let rawPrices: unknown
+let priceTable = asPriceTable(undefined)
+
+const setText = (e: HTMLElement, t: string): void => { if (e.textContent !== t) e.textContent = t }
+const cardOpen = (): boolean => !cardEl.hidden
+const fillCard = (r: AgentRow): void => {
+  const u = r.usage
+  setText(cardFields.name, r.name)
+  setText(cardFields.status, r.status)
+  setText(cardFields.tool, r.tool ?? 'none')
+  setText(cardFields.dir, shortDir(r.cwd))
+  setText(cardFields.model, r.model ?? 'unknown')
+  setText(cardFields.tokens, `${r.tokensLabel} (in ${formatTokens(u.input)}, out ${formatTokens(u.output)}, cache ${formatTokens(u.cacheRead + u.cacheWrite)})`)
+  setText(cardFields.cost, `${r.costLabel}${r.cost.known && mirror.pricesAreExample() ? ' (example prices)' : ''}`)
+  setText(cardFields.elapsed, r.elapsedLabel)
+  setText(cardFields.subs, String(r.subagents))
+}
+const closeCard = (): void => { cardEl.hidden = true }
+const select = (key: string | undefined, open = false): void => {
+  selectedKey = key
+  const r = summary.agents.find((a) => a.key === key)
+  if (!r) { closeCard(); return }
+  liveEl.textContent = `${r.name}: ${r.status}`
+  if (open) { fillCard(r); cardEl.hidden = false }
+  else if (cardOpen()) fillCard(r)
+}
+const refreshSelection = (): void => {
+  const r = selectedKey === undefined ? undefined : summary.agents.find((a) => a.key === selectedKey)
+  if (!r) { selectedKey = undefined; closeCard(); return }
+  if (cardOpen()) fillCard(r)
+}
+const currentFit = () => fitScale(VIEW_W, VIEW_H, document.documentElement.clientWidth, Math.max(1, document.documentElement.clientHeight - HUD_CSS_H), window.devicePixelRatio || 1)
+
+canvas.addEventListener('keydown', (e) => {
+  const keys = summary.agents.map((r) => r.key)
+  switch (e.key) {
+    case 'ArrowRight': case 'ArrowDown': select(cycleKey(keys, selectedKey, 1)); break
+    case 'ArrowLeft': case 'ArrowUp': select(cycleKey(keys, selectedKey, -1)); break
+    case 'n': case 'N': select(cycleKey(summary.needsYou.map((r) => r.key), selectedKey, 1)); break
+    case 'Enter': case ' ': select(selectedKey ?? keys[0], true); break
+    default: return
+  }
+  e.preventDefault()
+})
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return
+  if (cardOpen()) { closeCard(); canvas.focus() } else selectedKey = undefined
+})
+cardClose.addEventListener('click', () => { closeCard(); canvas.focus() })
+canvas.addEventListener('click', (e) => {
+  const dpr = window.devicePixelRatio || 1
+  const b = canvas.getBoundingClientRect()
+  const px = (e.clientX - b.left) * dpr
+  const py = (e.clientY - b.top) * dpr
+  const chip = hudHits.find((h) => px >= h.x && px <= h.x + h.w && py >= h.y && py <= h.y + h.h)
+  if (chip) { select(chip.key, true); return }
+  const v = toView(currentFit(), px, py)
+  const key = pickCharacter(sim.characters(), v.x, v.y)
+  if (key === undefined) { selectedKey = undefined; closeCard() } else select(key, true)
+})
+
 // ---- loop -------------------------------------------------------------------------------------
 const nowMs = (): number => (isDemoMode ? performance.now() : Date.now())
 
@@ -145,12 +223,20 @@ const draw = (): void => {
   }
   sim.sync(mirror.state(), now)
   updateMirror(now)
-  drawScene(offDraw, defaultLayout, sim.characters(), sprites, cache, performance.now())
-  const f = fitScale(VIEW_W, VIEW_H, document.documentElement.clientWidth, document.documentElement.clientHeight, window.devicePixelRatio || 1)
+  const raw = mirror.prices()
+  if (raw !== rawPrices) { rawPrices = raw; priceTable = asPriceTable(raw) }
+  summary = summarize(mirror.state(), priceTable, mirror.pricesAreExample(), now)
+  refreshSelection()
+  drawScene(offDraw, defaultLayout, sim.characters(), sprites, cache, performance.now(), { reducedMotion: motion.matches, selectedKey })
+  const f = currentFit()
   ctx.imageSmoothingEnabled = false
   ctx.fillStyle = PAL.bg
   ctx.fillRect(0, 0, canvas.width, canvas.height)
   ctx.drawImage(off, 0, 0, VIEW_W, VIEW_H, f.x, f.y, f.w, f.h)
+  // HUD band after the integer-scaled blit, in real pixels, so its text is crisp.
+  const dpr = window.devicePixelRatio || 1
+  const hudH = Math.round(HUD_CSS_H * dpr)
+  hudHits = drawHud(ctx, summary, { x: 0, y: canvas.height - hudH, w: canvas.width, h: hudH }, dpr, selectedKey)
 }
 
 createLoop({
