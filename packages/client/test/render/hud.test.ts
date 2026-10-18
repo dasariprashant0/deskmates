@@ -3,7 +3,7 @@ import { describe, expect, test } from 'vitest'
 import { summarize } from '../../src/hud/summary'
 import type { Ctx2D } from '../../src/render/draw'
 import { drawHud } from '../../src/render/hud'
-import { HUD_PAIRS } from '../../src/render/palette'
+import { FLOOR_TILES, HUD_PAIRS, RING_COLOR } from '../../src/render/palette'
 
 type Op = { op: string; args: unknown[] }
 const recorder = (): { ctx: Ctx2D; ops: Op[] } => {
@@ -21,6 +21,35 @@ const mk = (sid: string, o: Partial<AgentState> = {}): AgentState => ({
 const office = (...a: AgentState[]): OfficeState => ({ agents: Object.fromEntries(a.map((x) => [x.key, x])), order: a.map((x) => x.key), seq: 0 })
 const box = { x: 0, y: 500, w: 1600, h: 40 }
 const texts = (ops: Op[]): string[] => ops.filter((o) => o.op === 'fillText').map((o) => String(o.args[0]))
+
+describe('drawHud fit', () => {
+  const busy = summarize(
+    office(
+      ...Array.from({ length: 12 }, (_, i) => mk(`w${i}`, { model: 'example-model', usage: { input: 3_000_000, cacheWrite: 0, cacheRead: 0, output: 0 } })),
+      ...Array.from({ length: 3 }, (_, i) => mk(`t${i}`, { status: 'thinking' })),
+      mk('e', { status: 'error' }),
+      mk('n', { status: 'waiting', attention: { toolUseId: 'x', source: 'hook', since: 1 } }),
+    ),
+    EXAMPLE_PRICES, true, 0,
+  )
+  test.each([320, 480, 640, 1280])('nothing is cut off and errors + cost stay visible at %i px', (w) => {
+    const r = recorder()
+    drawHud(r.ctx, busy, { x: 0, y: 0, w, h: 32 }, 1)
+    const placed = r.ops.filter((o) => o.op === 'fillText')
+    for (const o of placed) expect(Number(o.args[1]) + String(o.args[0]).length * 7).toBeLessThanOrEqual(w)
+    const all = texts(r.ops).join(' | ')
+    expect(all).toMatch(/\b1 errors|\b1x/)
+    expect(all).toContain('~$')
+  })
+  test('wide boxes keep the full wording, narrow ones abbreviate', () => {
+    const wide = recorder()
+    drawHud(wide.ctx, busy, { x: 0, y: 0, w: 1280, h: 32 }, 1)
+    expect(texts(wide.ops).join(' ')).toContain('12 working')
+    const narrow = recorder()
+    drawHud(narrow.ctx, busy, { x: 0, y: 0, w: 320, h: 32 }, 1)
+    expect(texts(narrow.ops).join(' ')).not.toContain('working')
+  })
+})
 
 describe('drawHud', () => {
   test('empty state draws without throwing and shows zero counts', () => {
@@ -92,5 +121,12 @@ const contrast = (a: string, b: string): number => {
 describe('HUD contrast', () => {
   test.each(HUD_PAIRS.map((p) => [...p]))('%s on %s is at least 4.5:1', (fg, bg) => {
     expect(contrast(fg as string, bg as string)).toBeGreaterThanOrEqual(4.5)
+  })
+})
+
+describe('ring contrast', () => {
+  const cases = Object.entries(RING_COLOR).flatMap(([ring, color]) => FLOOR_TILES.map((floor) => [ring, color, floor]))
+  test.each(cases)('%s ring %s on floor %s is at least 3:1', (_ring, color, floor) => {
+    expect(contrast(color as string, floor as string)).toBeGreaterThanOrEqual(3)
   })
 })

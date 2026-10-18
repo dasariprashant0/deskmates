@@ -470,8 +470,8 @@ export function createSim(opts: SimOptions = {}): Sim {
       syncNow = nowMs
       tSync = t
       const seen = new Set<string>()
-      const keys = [...state.order, ...Object.keys(state.agents)]
-      for (const key of keys) {
+      // core reduce only ever adds an agent together with its `order` entry, so `order` covers every agent.
+      for (const key of state.order) {
         const a = state.agents[key]
         if (!a || seen.has(key)) continue
         seen.add(key)

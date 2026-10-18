@@ -22,7 +22,7 @@ const KINDS: readonly Kind[] = [
   { name: 'WebFetch', act: 'searching', lo: 3000, hi: 7000, labels: ['docs.example.com', 'rfc-9110'] },
   { name: 'WebSearch', act: 'searching', lo: 4000, hi: 9000, labels: ['vite config', 'token bucket'] },
 ]
-const MODELS = { api: 'claude-sonnet-4-5', docs: 'claude-haiku-4-5', dm: 'claude-opus-4-1' }
+const MODELS = { api: 'example-model', docs: 'example-model-small', dm: 'example-model' } // keys of EXAMPLE_PRICES, so demo costs show
 
 const between = (r: Rng, lo: number, hi: number): number => Math.round((lo + r.next() * (hi - lo)) / 100) * 100
 
