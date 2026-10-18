@@ -6,7 +6,8 @@
   "main": "src/index.ts",
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc -p . --noEmit"
+    "typecheck": "tsc -p . --noEmit",
+    "build": "node build.mjs"
   },
   "bin": {
     "deskmates": "dist/deskmates.js"
@@ -20,5 +21,11 @@
   "devDependencies": {
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
   }
 }
