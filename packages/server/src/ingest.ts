@@ -95,7 +95,7 @@ export const createIngest = (opts: IngestOpts) => {
         if (c === 'meta-corrupt') meta.corrupt++; else meta.shape++
         warnOnChange('meta', c)
       })
-    } catch { m = undefined }
+    } catch (e) { m = undefined; warnOnChange('meta', codeOf(e)) } // reachable via an injected dep; the stock reader never throws
     if (stopped || known.get(src.filePath) !== entry) return // removed while reading meta
     const ok = emit({
       ts: now(), kind: 'agent.spawn', depth: m?.spawnDepth ?? 1,
@@ -154,6 +154,10 @@ export const createIngest = (opts: IngestOpts) => {
   const runPoll = async () => {
     poll.runs++
     try { await tailer.poll() } catch (e) { fail('poll', e, poll.errors) }
+    // Per-file tail failures never throw out of poll(); surface them here, and re-arm once all files recover.
+    const t = tailer.stats()
+    if (t.failing > 0 && t.lastError) warnOnChange('poll', t.lastError.code)
+    else if (t.failing === 0) lastWarn.poll = undefined
     poll.lastAt = now()
   }
 
@@ -169,10 +173,10 @@ export const createIngest = (opts: IngestOpts) => {
   const pollG = guard(runPoll)
 
   let timers: ReturnType<typeof setInterval>[] = []
-  const loop = (g: ReturnType<typeof guard>, ms: number) => {
+  const loop = (g: ReturnType<typeof guard>, ms: number, where: 'scan' | 'poll', bucket: Record<string, number>) => {
     const h = setInterval(() => {
       if (g.busy()) { loopStats.skippedTicks++; return }
-      g.call().catch(() => {})
+      g.call().catch((e) => { try { fail(where, e, bucket) } catch { /* reporting must never throw out of the timer */ } })
     }, ms)
     h.unref()
     return h
@@ -195,7 +199,7 @@ export const createIngest = (opts: IngestOpts) => {
     start() {
       stopped = false
       if (timers.length) return
-      timers = [loop(scanG, opts.scanMs ?? 2000), loop(pollG, opts.pollMs ?? 250)]
+      timers = [loop(scanG, opts.scanMs ?? 2000, 'scan', scan.errors), loop(pollG, opts.pollMs ?? 250, 'poll', poll.errors)]
     },
     async stop() {
       stopped = true

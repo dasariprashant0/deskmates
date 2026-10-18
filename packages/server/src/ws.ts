@@ -1,10 +1,10 @@
 import { homedir } from 'node:os'
 import type http from 'node:http'
 import type stream from 'node:stream'
-import type { NormalizedEvent, PriceTable } from '@deskmates/core'
+import type { AgentState, NormalizedEvent, OfficeState, PriceTable } from '@deskmates/core'
 import { WebSocketServer, type WebSocket } from 'ws'
 import type { EventBus } from './bus'
-import { redactDeep } from './redact'
+import { makeRedactor, redactWith } from './redact'
 import { SECURITY_HEADERS, checkHost, checkOrigin, checkToken } from './security'
 
 export type WsOpts = {
@@ -18,6 +18,8 @@ export type WsOpts = {
   maxBufferedBytes?: number
   pingMs?: number
   maxQueued?: number
+  /** Hard cap for one serialized frame (snapshot or events batch). Client limit is 1 MiB; default leaves headroom. */
+  maxFrameBytes?: number
   homeDir?: string
   now?: () => number
 }
@@ -38,6 +40,41 @@ export type WsHub = {
 
 const PROTOCOL = 'deskmates.v1'
 const MAX_IGNORED = 20
+const bytes = (s: string) => Buffer.byteLength(s)
+
+const isEnded = (a: AgentState) => a.status === 'done' || a.status === 'error'
+// Removal priority when a snapshot is too big: ended agents oldest first, then other agents oldest first,
+// agents holding an attention request last.
+const dropRank = (a: AgentState) => [a.attention ? 2 : isEnded(a) ? 0 : 1, a.endedAt ?? a.lastEventAt] as const
+
+// Drops agents (see dropRank) until the whole frame fits `max` bytes; returns the serialized frame.
+const fitSnapshot = (head: Record<string, unknown>, state: OfficeState, max: number): string => {
+  const frame = (st: OfficeState) => JSON.stringify({ ...head, state: st })
+  const full = frame(state)
+  if (bytes(full) <= max) return full
+  const rank = new Map(state.order.map((k) => [k, state.agents[k] ? dropRank(state.agents[k]) : ([3, 0] as const)]))
+  const victims = [...state.order].sort((a, b) => rank.get(a)![0] - rank.get(b)![0] || rank.get(a)![1] - rank.get(b)![1])
+  const sizes = new Map(state.order.map((k) => [k, bytes(JSON.stringify(state.agents[k])) + 2 * k.length + 8]))
+  let over = bytes(full) - max
+  const gone = new Set<string>()
+  const build = () => {
+    const agents: Record<string, AgentState> = {}
+    for (const k of state.order) {
+      const a = state.agents[k]
+      if (!a || gone.has(k)) continue
+      agents[k] = { ...a, children: a.children.filter((c) => !gone.has(c)) }
+      if (a.parentKey !== undefined && gone.has(a.parentKey)) delete agents[k].parentKey
+    }
+    return frame({ ...state, agents, order: state.order.filter((k) => !gone.has(k)) })
+  }
+  for (let i = 0; ; ) {
+    while (over > 0 && i < victims.length) { const k = victims[i++]!; gone.add(k); over -= sizes.get(k)! }
+    const out = build()
+    over = bytes(out) - max
+    if (over <= 0 || i >= victims.length) return out // empty state is the floor; only prices can still exceed
+    over += 1024 // estimate was short: take a bit more next round
+  }
+}
 const REASONS: Record<number, string> = { 401: 'Unauthorized', 403: 'Forbidden', 404: 'Not Found', 503: 'Service Unavailable' }
 
 type Client = { ws: WebSocket; queue: NormalizedEvent[]; resyncPending: boolean; alive: boolean; ignored: number; resyncAt: number[] }
@@ -51,15 +88,17 @@ export const createWsHub = (opts: WsOpts): WsHub => {
   const wss = new WebSocketServer({ noServer: true, perMessageDeflate: false, maxPayload: opts.maxMessageBytes ?? 4096,
     handleProtocols: (protocols: Set<string>) => (protocols.has(PROTOCOL) ? PROTOCOL : false),
   })
-  const homeDir = opts.homeDir ?? homedir()
+  const maxFrame = opts.maxFrameBytes ?? 900_000
+  const redact = makeRedactor(opts.homeDir ?? homedir()) // compiled once
   const now = opts.now ?? Date.now
   const clients = new Set<Client>()
   const st = { accepted: 0, rejected: {} as Record<string, number>, resyncs: 0, ignoredMessages: 0, droppedSlow: 0, resyncLimited: 0 }
   let closed = false
   let closing: Promise<void> | undefined
 
+  const count = (reason: string) => { st.rejected[reason] = (st.rejected[reason] ?? 0) + 1 }
   const reject = (socket: stream.Duplex, status: 401 | 403 | 404 | 503, reason: string) => {
-    st.rejected[reason] = (st.rejected[reason] ?? 0) + 1
+    count(reason)
     const body = reason
     const headers = { ...SECURITY_HEADERS(opts.getPort()), 'Content-Type': 'text/plain; charset=utf-8', 'Content-Length': String(body.length), Connection: 'close' }
     const head = Object.entries(headers).map(([k, v]) => `${k}: ${v}`).join('\r\n')
@@ -69,13 +108,34 @@ export const createWsHub = (opts: WsOpts): WsHub => {
     setTimeout(() => socket.destroy(), 1000).unref()
   }
 
-  const send = (c: Client, payload: unknown) => {
+  const sendRaw = (c: Client, text: string) => {
     if (closed || c.ws.readyState !== c.ws.OPEN) return
-    c.ws.send(JSON.stringify(payload), (err) => { if (err) c.ws.terminate() })
+    c.ws.send(text, (err) => { if (err) { count('socket-error'); c.ws.terminate() } })
   }
   const snapshot = (c: Client) => {
     const { prices, pricesAreExample } = opts.getExtras()
-    send(c, { type: 'snapshot', v: 1, seq: opts.bus.seq(), state: redactDeep(opts.bus.state(), homeDir), prices, pricesAreExample })
+    const head = { type: 'snapshot', v: 1, seq: opts.bus.seq(), prices, pricesAreExample }
+    sendRaw(c, fitSnapshot(head, redactWith(opts.bus.state(), redact), maxFrame))
+  }
+  // Serialized event frames, shared by every client whose batch is the same; cleared per flush.
+  const eventFrames = (events: NormalizedEvent[], cache: Map<string, string[]>): string[] => {
+    const first = events[0]!
+    const last = events[events.length - 1]!
+    const key = `${first.seq}:${last.seq}:${events.length}`
+    let out = cache.get(key)
+    if (!out) {
+      const red = redactWith(events, redact)
+      const enc = (from: number, to: number): string[] => {
+        const part = red.slice(from, to)
+        const str = JSON.stringify({ type: 'events', fromSeq: part[0]!.seq, toSeq: part[part.length - 1]!.seq, events: part })
+        if (part.length === 1 || bytes(str) <= maxFrame) return [str] // a single event is capped at parse time
+        const mid = from + Math.ceil(part.length / 2)
+        return [...enc(from, mid), ...enc(mid, to)]
+      }
+      out = enc(0, red.length)
+      cache.set(key, out)
+    }
+    return out
   }
 
   const unsubscribe = opts.bus.subscribe((ev) => {
@@ -87,6 +147,7 @@ export const createWsHub = (opts: WsOpts): WsHub => {
   })
 
   const flush = () => {
+    const cache = new Map<string, string[]>()
     for (const c of [...clients]) {
       if (c.ws.bufferedAmount > maxBuffered) { st.droppedSlow++; c.ws.terminate(); continue }
       if (c.resyncPending) {
@@ -97,9 +158,7 @@ export const createWsHub = (opts: WsOpts): WsHub => {
       } else if (c.queue.length > 0) {
         const events = c.queue
         c.queue = []
-        const first = events[0]
-        const last = events[events.length - 1]
-        if (first && last) send(c, { type: 'events', fromSeq: first.seq, toSeq: last.seq, events: redactDeep(events, homeDir) })
+        for (const frame of eventFrames(events, cache)) sendRaw(c, frame)
       }
     }
   }
@@ -139,7 +198,7 @@ export const createWsHub = (opts: WsOpts): WsHub => {
   }
 
   const accept = (ws: WebSocket) => {
-    ws.on('error', () => ws.terminate())
+    ws.on('error', () => { count('socket-error'); ws.terminate() })
     const c: Client = { ws, queue: [], resyncPending: false, alive: true, ignored: 0, resyncAt: [] }
     clients.add(c)
     st.accepted++
@@ -154,7 +213,7 @@ export const createWsHub = (opts: WsOpts): WsHub => {
   }
 
   const handleUpgrade: WsHub['handleUpgrade'] = (req, socket, head) => {
-    socket.on('error', () => socket.destroy())
+    socket.on('error', () => { count('socket-error'); socket.destroy() })
     if (closed) return reject(socket, 503, 'closed')
     if (req.url !== '/ws') return reject(socket, 404, 'bad-path')
     const port = opts.getPort()
@@ -169,6 +228,7 @@ export const createWsHub = (opts: WsOpts): WsHub => {
     try {
       wss.handleUpgrade(req, socket, head, accept)
     } catch {
+      count('upgrade-failed')
       socket.destroy()
     }
   }
