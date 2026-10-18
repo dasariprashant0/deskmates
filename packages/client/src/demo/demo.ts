@@ -1,4 +1,4 @@
-import { emptyState, type Activity, type AgentRef, type NormalizedEvent } from '@deskmates/core'
+import { emptyState, EXAMPLE_PRICES, type Activity, type AgentRef, type NormalizedEvent } from '@deskmates/core'
 import type { SnapshotMessage } from '../net/protocol'
 import { createRng, type Rng } from '../sim/rng'
 
@@ -9,7 +9,7 @@ type Body = DistOmit<NormalizedEvent, 'seq' | 'ts' | 'agent'>
 export const LOOP_MS = 100_000
 
 export const demoSnapshot = (): SnapshotMessage => ({
-  type: 'snapshot', v: 1, seq: 0, state: emptyState(), prices: {}, pricesAreExample: true,
+  type: 'snapshot', v: 1, seq: 0, state: emptyState(), prices: EXAMPLE_PRICES, pricesAreExample: true,
 })
 
 type Kind = { name: string; act: Activity; lo: number; hi: number; labels: readonly string[] }
