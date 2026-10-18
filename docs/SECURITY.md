@@ -31,3 +31,22 @@ Status: draft v0.1, from the `agentic-council:Skeptic` agent's review. Design le
 - No state-changing endpoint without a per-run secret plus Host and Origin validation, tested against a real DNS-rebinding harness.
 - Nothing is installed into the user's settings without a shown diff and explicit consent.
 - No transcript content leaves the machine.
+
+## What the v0.1 server implements (read-only surface)
+
+The v0.1 server exposes no state-changing endpoint. What exists, and how it was verified:
+
+- Loopback only: it binds `127.0.0.1` and refuses any other `host` (`host-not-allowed`). No LAN mode.
+- Every HTTP request: exact `Host` (`localhost:PORT` or `127.0.0.1:PORT`, one header only), method GET or HEAD only (else 405), exact `Origin` when present, and `Sec-Fetch-Site: cross-site` refused. No CORS headers, no cookies.
+- Static shell: `/` and the app assets are public (they contain no data and the page cannot attach a token to relative asset requests). Path handling resists traversal, encodings, NUL, dotfiles, symlinks, FIFOs and case-variant paths.
+- Token: at least 32 characters from `[A-Za-z0-9_-]`, compared in constant time. It travels in the URL fragment of the launch link (`http://127.0.0.1:PORT/#t=TOKEN`), which browsers never send to the server, never put in `Referer`, and which the page script should clear with `history.replaceState`. It is presented to the WebSocket as the second `Sec-WebSocket-Protocol` entry after `deskmates.v1`, and to `/api/status` as `Authorization: Bearer`. A query-string token is never accepted.
+- WebSocket: upgrade checks Host, Origin and token before upgrading; limits on clients, message size, queue and slow readers; heartbeat; at most 5 `resync` per second per client; only `resync` is honored.
+- Privacy: snapshots and event frames replace the home directory with `~`; `tool_result` bodies are never carried; `/api/status` carries counts and error codes only.
+- Verified by: the Node test suite (321 tests), an independent live attack run of about 110 attacks (Host, Origin, subprotocol, traversal, smuggling, WebSocket abuse, timeouts, leaks; no critical or high findings), and a design review against this document.
+
+### Known limits and conditions for v0.2 (approve and deny)
+
+- No real-browser DNS-rebinding harness exists yet. A rebound request always carries the attacker's hostname in `Host`, which the tests send, but the non-negotiable asks for a real-browser harness before any state-changing endpoint ships.
+- Before v0.2 adds approve and deny: use a separate decide capability and secret (not the read token), require a present same-origin `Origin` and a user gesture, show the raw command from the hook payload, and implement the request state machine, timeouts and race tests from risks 2, 3, 4 and 13.
+- The attack runs used Bun for convenience; Node is the supported runtime. Re-run the live attack script under Node before a public release.
+- Any other process on the same machine can connect if it has the token; the token is the only protection against local users.
