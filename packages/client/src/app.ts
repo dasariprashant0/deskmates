@@ -62,7 +62,12 @@ if (isDemoMode) {
 
 // ---- sim and rendering ------------------------------------------------------------------------
 const motion = matchMedia('(prefers-reduced-motion: reduce)')
-const newSim = (): Sim => createSim({ layout: defaultLayout, reducedMotion: motion.matches })
+let showAll = false
+const newSim = (): Sim => {
+  const s = createSim({ layout: defaultLayout, reducedMotion: motion.matches })
+  s.setShowAll(showAll)
+  return s
+}
 let sim = newSim()
 motion.addEventListener('change', () => { sim = newSim() })
 
@@ -141,6 +146,7 @@ const updateMirror = (sm: Summary): void => {
 const HUD_CSS_H = 32
 let summary: Summary = { agents: [], needsYou: [], totals: { running: 0, thinking: 0, needsYou: 0, errors: 0, tokens: 0, usd: 0, anyExample: false, partialCost: false } }
 let selectedKey: string | undefined
+let hoveredKey: string | undefined
 let hudHits: ChipHit[] = []
 let rawPrices: unknown
 let priceTable = asPriceTable(undefined)
@@ -190,6 +196,12 @@ canvas.addEventListener('keydown', (e) => {
       else select(next)
       break
     }
+    case 'a': case 'A':
+      showAll = !showAll
+      sim.setShowAll(showAll)
+      lastRefresh = -Infinity // recount the hidden agents on the next frame
+      announcer.say(showAll ? 'Showing all agents' : 'Showing active agents only')
+      break
     case 'Enter': case ' ': select(selectedKey ?? keys[0], true); break
     default: return
   }
@@ -200,6 +212,14 @@ document.addEventListener('keydown', (e) => {
   if (cardOpen()) { closeCard(); canvas.focus() } else selectedKey = undefined
 })
 cardClose.addEventListener('click', () => { closeCard(); canvas.focus() })
+canvas.addEventListener('pointermove', (e) => {
+  const dpr = window.devicePixelRatio || 1
+  const b = canvas.getBoundingClientRect()
+  const f = currentFit()
+  const v = toView(f, (e.clientX - b.left) * dpr, (e.clientY - b.top) * dpr)
+  hoveredKey = pickCharacter(sim.characters(), v.x, v.y, minBoxView(f.scale, dpr))
+})
+canvas.addEventListener('pointerleave', () => { hoveredKey = undefined })
 canvas.addEventListener('click', (e) => {
   if (!isPointerClick(e)) return // Enter can fire a synthetic click at the centre; keydown handles Enter
   const dpr = window.devicePixelRatio || 1
@@ -237,9 +257,9 @@ const draw = (): void => {
     lastRefresh = now
     const raw = mirror.prices()
     if (raw !== rawPrices) { rawPrices = raw; priceTable = asPriceTable(raw) }
-    summary = summarize(mirror.state(), priceTable, mirror.pricesAreExample(), now)
+    summary = { ...summarize(mirror.state(), priceTable, mirror.pricesAreExample(), now), hidden: sim.hiddenCount() }
     updateMirror(summary)
-    const totals = describeTotals(summary.totals)
+    const totals = describeTotals(summary.totals, summary.hidden)
     if (totals !== lastTotals) { lastTotals = totals; summaryEl.textContent = totals }
     refreshSelection()
   }
@@ -247,7 +267,7 @@ const draw = (): void => {
   if (say !== undefined) liveEl.textContent = say
   renderStatic(defaultLayout)
   offDraw.drawImage(staticOff, 0, 0)
-  drawCharacters(offDraw, sim.characters(), sprites, cache, { selectedKey })
+  drawCharacters(offDraw, sim.characters(), sprites, cache, { selectedKey, hoveredKey })
   const f = currentFit()
   ctx.imageSmoothingEnabled = false
   ctx.fillStyle = PAL.bg
