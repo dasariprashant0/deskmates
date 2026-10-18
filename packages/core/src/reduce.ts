@@ -101,7 +101,38 @@ const apply = (a: AgentState, e: NormalizedEvent): Partial<AgentState> => {
   }
 }
 
-export const reduce = (state: OfficeState, event: NormalizedEvent): OfficeState => {
+export type PruneOpts = { maxEndedAgeMs?: number; maxAgents?: number }
+const DEFAULT_MAX_ENDED_AGE_MS = 30 * 60_000
+const DEFAULT_MAX_AGENTS = 500
+
+// Drops ended (done/error) agents older than maxEndedAgeMs relative to `now` (the event timestamp, so the reducer
+// stays pure and replays identically on the client), then the oldest ended ones while over maxAgents. Live agents are
+// never dropped. An ended agent that still has a kept child is kept too, so parentKey never dangles.
+const prune = (agents: Record<string, AgentState>, order: string[], now: number, o: PruneOpts) => {
+  const maxAge = o.maxEndedAgeMs ?? DEFAULT_MAX_ENDED_AGE_MS
+  const maxAgents = o.maxAgents ?? DEFAULT_MAX_AGENTS
+  const ended = order.map((k) => agents[k]).filter((a): a is AgentState => !!a && terminal(a.status))
+  const drop = new Set(ended.filter((a) => a.endedAt !== undefined && now - a.endedAt > maxAge).map((a) => a.key))
+  let over = order.length - drop.size - maxAgents
+  if (over > 0) {
+    for (const a of ended.filter((x) => !drop.has(x.key)).sort((x, y) => (x.endedAt ?? x.lastEventAt) - (y.endedAt ?? y.lastEventAt))) {
+      if (over-- <= 0) break
+      drop.add(a.key)
+    }
+  }
+  if (drop.size === 0) return undefined
+  const dropped = new Set([...drop].filter((k) => agents[k]!.children.every((c) => drop.has(c) || !agents[c])))
+  if (dropped.size === 0) return undefined
+  const out: Record<string, AgentState> = {}
+  for (const k of order) {
+    const a = agents[k]
+    if (!a || dropped.has(k)) continue
+    out[k] = a.children.some((c) => dropped.has(c)) ? { ...a, children: a.children.filter((c) => !dropped.has(c)) } : a
+  }
+  return { agents: out, order: order.filter((k) => !dropped.has(k)) }
+}
+
+export const reduceWith = (state: OfficeState, event: NormalizedEvent, pruneOpts: PruneOpts): OfficeState => {
   if (!has(KINDS, event.kind)) return state
   // ponytail: copies `agents` (O(agents)) per event; switch to structural sharing (immer-style) if sessions reach thousands.
   const agents = { ...state.agents }
@@ -133,5 +164,9 @@ export const reduce = (state: OfficeState, event: NormalizedEvent): OfficeState 
 
   const a = ensure(event.agent)
   patch(a, { ...apply(a, event), lastEventAt: Math.max(a.lastEventAt, event.ts) })
-  return { agents, order, seq: Math.max(state.seq, event.seq) }
+  const pruned = prune(agents, order, event.ts, pruneOpts)
+  return { agents: pruned?.agents ?? agents, order: pruned?.order ?? order, seq: Math.max(state.seq, event.seq) }
 }
+
+// Two-arg form so it is safe as an Array.reduce callback (the index must not land in pruneOpts).
+export const reduce = (state: OfficeState, event: NormalizedEvent): OfficeState => reduceWith(state, event, {})

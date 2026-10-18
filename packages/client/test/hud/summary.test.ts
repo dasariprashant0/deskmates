@@ -1,6 +1,6 @@
 import { EXAMPLE_PRICES, type AgentState, type OfficeState } from '@deskmates/core'
 import { describe, expect, test } from 'vitest'
-import { cycleKey, ENDED_GRACE_MS, shortDir, summarize } from '../../src/hud/summary'
+import { cycleKey, describeTotals, ENDED_GRACE_MS, shortDir, summarize } from '../../src/hud/summary'
 
 const mk = (sid: string, o: Partial<AgentState> = {}): AgentState => ({
   key: `t:${sid}:main`, ref: { provider: 't', sessionId: sid }, cwd: '/home/u/proj', status: 'working', activity: 'typing',
@@ -75,5 +75,16 @@ describe('cycleKey', () => {
     expect(cycleKey(['a', 'b', 'c'], 'c', 1)).toBe('a')
     expect(cycleKey(['a', 'b', 'c'], 'a', -1)).toBe('c')
     expect(cycleKey(['a', 'b', 'c'], 'gone', 1)).toBe('a')
+  })
+})
+
+describe('describeTotals', () => {
+  test('counts, tokens, ~cost and example marker', () => {
+    const s = summarize(office(mk('a', { model: 'example-model', usage: { input: 2_000_000, cacheWrite: 0, cacheRead: 0, output: 0 } }), mk('b', { status: 'error' })), EXAMPLE_PRICES, true, NOW)
+    expect(describeTotals(s.totals)).toBe('1 working, 0 thinking, 0 need you, 1 errors. 2M tokens. Estimated cost ~$2.00+ (example prices).')
+  })
+  test('real prices have no marker', () => {
+    const s = summarize(office(mk('a')), EXAMPLE_PRICES, false, NOW)
+    expect(describeTotals(s.totals)).not.toContain('example')
   })
 })

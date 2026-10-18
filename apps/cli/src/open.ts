@@ -11,6 +11,7 @@ export const openBrowser = (url: string, o: { platform?: string; spawn?: Spawn }
     : platform === 'win32' ? ['cmd', ['/c', 'start', '', url]] as const
     : ['xdg-open', [url]] as const
   try {
+    // The URL (token in the fragment) is an argv entry, so other local users can see it in `ps` while the opener lives; see docs/SECURITY.md.
     const child = spawn(cmd, [...args], { detached: true, stdio: 'ignore', windowsHide: true })
     child.on?.('error', () => undefined) // ENOENT arrives asynchronously; do not crash
     child.unref()

@@ -1,6 +1,6 @@
-import type { Summary } from '../hud/summary'
+import type { Summary, Totals } from '../hud/summary'
 import { formatCost, formatTokens } from '../hud/cost'
-import type { Ctx2D } from './draw'
+import { measure, type Ctx2D } from './draw'
 import { HUD, RING_COLOR } from './palette'
 
 export type Box = { x: number; y: number; w: number; h: number }
@@ -33,9 +33,26 @@ function marker(c: Ctx2D, kind: Kind, x: number, cy: number, u: number): void {
   }
 }
 
+type Item = { kind?: Kind; text: string; color: string; lead: number }
+type Level = 0 | 1 | 2
+
+/**
+ * The stats row at three widths: 0 full words, 1 abbreviated counts ('2w 1t 1! 0x') with tokens, 2 counts and cost only.
+ * Errors and cost are in every level.
+ */
+function items(t: Totals, level: Level, u: number): Item[] {
+  const counts: [Kind, number, string, string][] = [['working', t.running, 'working', 'w'], ['thinking', t.thinking, 'thinking', 't'], ['needs', t.needsYou, 'needs you', '!'], ['error', t.errors, 'errors', 'x']]
+  const out: Item[] = counts.map(([kind, n, long, short]) => ({ kind, text: level === 0 ? `${n} ${long}` : `${n}${short}`, color: HUD.text, lead: 0 }))
+  if (level < 2) out.push({ text: `${formatTokens(t.tokens)}${level === 0 ? ' tokens' : ' tok'}`, color: HUD.text, lead: 0 })
+  out.push({ text: `${level === 0 ? 'cost ' : ''}${formatCost({ usd: t.usd, known: true })}${t.partialCost ? '+' : ''}`, color: HUD.text, lead: 0 })
+  if (t.anyExample) out.push({ text: level === 0 ? 'example prices' : '(ex)', color: HUD.dim, lead: Math.round(6 * u) })
+  return out
+}
+
 /**
  * Bottom HUD band, drawn in real device pixels (crisp text). `unit` is the device pixel ratio.
  * Returns the hit rects of the needs-you chips it drew. Pure on a Ctx2D; text goes through fillText only.
+ * The stats row is measured first and abbreviated until it fits the box, so errors and cost are never cut off.
  */
 export function drawHud(c: Ctx2D, s: Summary, box: Box, unit: number, selectedKey?: string): ChipHit[] {
   const u = Math.max(1, unit)
@@ -48,41 +65,38 @@ export function drawHud(c: Ctx2D, s: Summary, box: Box, unit: number, selectedKe
   c.font = `${Math.round(14 * u)}px ${FONT}`
   c.textAlign = 'left'
   c.textBaseline = 'middle'
-  let x = box.x + pad
-
-  const text = (t: string, color: string): void => {
-    c.fillStyle = color
-    c.fillText(t, x, cy)
-    x += Math.ceil(c.measureText(t).width)
+  const left = box.x + pad
+  const right = box.x + box.w - pad
+  const markerW = Math.round(14 * u)
+  const width = (list: Item[]): number => list.reduce((w, i) => w + i.lead + (i.kind ? markerW : 0) + Math.ceil(measure(c, i.text)) + pad, 0)
+  let row = items(s.totals, 0, u)
+  for (const level of [1, 2] as const) {
+    if (left + width(row) - pad <= right) break
+    row = items(s.totals, level, u)
   }
-  const t = s.totals
-  for (const [kind, n, label] of [['working', t.running, 'working'], ['thinking', t.thinking, 'thinking'], ['needs', t.needsYou, 'needs you'], ['error', t.errors, 'errors']] as const) {
-    marker(c, kind, x, cy, u)
-    x += Math.round(14 * u)
-    text(`${n} ${label}`, HUD.text)
-    x += pad
+  let x = left
+  for (const i of row) {
+    x += i.lead
+    if (i.kind) {
+      marker(c, i.kind, x, cy, u)
+      x += markerW
+    }
+    c.fillStyle = i.color
+    c.fillText(i.text, x, cy)
+    x += Math.ceil(measure(c, i.text)) + pad
   }
-  text(`${formatTokens(t.tokens)} tokens`, HUD.text)
-  x += pad
-  text(`cost ${formatCost({ usd: t.usd, known: true })}${t.partialCost ? '+' : ''}`, HUD.text)
-  if (t.anyExample) {
-    x += Math.round(6 * u)
-    text('example prices', HUD.dim)
-  }
-  x += pad
 
   // needs-you chips: text label plus a diamond, never colour alone
   const hits: ChipHit[] = []
   const ch = Math.round(box.h * 0.7)
   const cyTop = Math.round(cy - ch / 2)
-  const plus = '+99'
-  const reserve = Math.ceil(c.measureText(plus).width) + pad
+  const reserve = Math.ceil(measure(c, '+99')) + pad
   let shown = 0
   for (const r of s.needsYou.slice(0, MAX_CHIPS)) {
     const label = `${clip(r.name, 10)}${r.status === 'maybe waiting' ? ' (maybe waiting)' : ''}`
-    const w = Math.ceil(c.measureText(label).width) + Math.round(26 * u)
+    const w = Math.ceil(measure(c, label)) + Math.round(26 * u)
     const more = s.needsYou.length - shown - 1
-    if (x + w + (more > 0 ? reserve : 0) > box.x + box.w - pad) break
+    if (x + w + (more > 0 ? reserve : 0) > right) break
     c.fillStyle = HUD.chipBg
     c.fillRect(x, cyTop, w, ch)
     marker(c, 'needs', x + Math.round(5 * u), cy, u * 0.8)
@@ -98,9 +112,10 @@ export function drawHud(c: Ctx2D, s: Summary, box: Box, unit: number, selectedKe
     shown++
   }
   const hidden = s.needsYou.length - shown
-  if (hidden > 0) {
+  const more = `+${hidden}`
+  if (hidden > 0 && x + Math.ceil(measure(c, more)) <= right) {
     c.fillStyle = HUD.text
-    c.fillText(`+${hidden}`, x, cy)
+    c.fillText(more, x, cy)
   }
   return hits
 }

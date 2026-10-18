@@ -70,8 +70,8 @@ export const readSubagentMeta = async (metaPath: string, onWarn?: (code: 'meta-c
     const o: unknown = JSON.parse(buf.toString('utf8', 0, bytesRead))
     if (!o || typeof o !== 'object' || Array.isArray(o)) { warn('meta-shape'); return undefined }
     const r = o as Record<string, unknown>
-    const str = (v: unknown) => (typeof v === 'string' ? v : undefined)
-    return { agentType: str(r.agentType), description: str(r.description), toolUseId: str(r.toolUseId),
+    const str = (v: unknown, max = 128) => (typeof v === 'string' ? (v.length > max ? v.slice(0, max) : v) : undefined)
+    return { agentType: str(r.agentType), description: str(r.description, 256), toolUseId: str(r.toolUseId),
       spawnDepth: typeof r.spawnDepth === 'number' ? r.spawnDepth : undefined }
   } catch (e) {
     if (code(e) !== 'ENOENT') warn('meta-corrupt')

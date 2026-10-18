@@ -19,6 +19,8 @@ export type TailerOpts = {
   maxLineBytes?: number
   chunkSize?: number
   recentMs?: number
+  /** A recent file bigger than this is backfilled from its last N bytes only (default 4 MiB). */
+  backfillMaxBytes?: number
   now?: () => number
 }
 type Entry = {
@@ -36,9 +38,12 @@ type Entry = {
   failed: boolean
   skipUntil: number
   fails: number
+  idleUntil: number // an old, unchanged file is not even stat'ed before this time
 }
 
 const HEAD = 64
+const IDLE_AGE_MS = 60_000
+const IDLE_RECHECK_MS = 2000
 const NL = 0x0a
 const BACKOFF_BASE_MS = 1000
 const BACKOFF_MAX_MS = 30_000
@@ -48,6 +53,7 @@ export class Tailer {
   private readonly entries = new Map<string, Entry>()
   private readonly maxLine: number
   private readonly recentMs: number
+  private readonly backfillMax: number
   private readonly now: () => number
   private counts = { lines: 0, skippedOversize: 0, resets: 0 }
   private errors: Record<string, number> = {}
@@ -61,6 +67,7 @@ export class Tailer {
     this.maxLine = opts.maxLineBytes ?? 1_048_576
     this.recentMs = opts.recentMs ?? 600_000
     this.now = opts.now ?? Date.now
+    this.backfillMax = opts.backfillMaxBytes ?? 4_194_304
     this.chunk = Math.max(1, opts.chunkSize ?? 65536)
     this.buf = Buffer.allocUnsafe(this.chunk)
   }
@@ -68,7 +75,7 @@ export class Tailer {
   add(src: SourceRef): void {
     if (!this.entries.has(src.filePath)) {
       this.entries.set(src.filePath, {
-        src, offset: 0, seen: false, parts: [], partLen: 0, discarding: false, removed: false, failed: false, skipUntil: 0, fails: 0,
+        src, offset: 0, seen: false, parts: [], partLen: 0, discarding: false, removed: false, failed: false, skipUntil: 0, fails: 0, idleUntil: 0,
       })
     }
   }
@@ -154,9 +161,16 @@ export class Tailer {
   private async readOne(e: Entry): Promise<void> {
     const p = e.src.filePath
     if (e.seen) {
+      if (this.now() < e.idleUntil) return
       // cheap check so an idle file costs one stat, not an open
       const s = await (this.opts.statFile ?? stat)(p)
-      if (s.ino === e.ino && s.size === e.offset && s.mtimeMs === e.mtimeMs) return
+      if (s.ino === e.ino && s.size === e.offset && s.mtimeMs === e.mtimeMs) {
+        // ponytail: an old file that did not change is re-checked every 2 s instead of every poll; a write to a
+        // file idle for over a minute is noticed up to 2 s late. Active files keep the full poll rate.
+        if (this.now() - s.mtimeMs > IDLE_AGE_MS) e.idleUntil = this.now() + IDLE_RECHECK_MS
+        return
+      }
+      e.idleUntil = 0
     }
     // O_NONBLOCK: opening a FIFO swapped in at the path must not block a libuv thread
     const fh = await (this.opts.openFile ?? ((f) => open(f, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0))))(p)
@@ -168,8 +182,12 @@ export class Tailer {
       if (!e.seen) {
         e.seen = true
         e.ino = st.ino
-        if (this.now() - st.mtimeMs <= this.recentMs) e.offset = 0
-        else {
+        if (this.now() - st.mtimeMs <= this.recentMs) {
+          // Huge recent file: replay only the last backfillMax bytes, dropping the partial line at the cut.
+          e.offset = st.size > this.backfillMax ? st.size - this.backfillMax : 0
+          e.discarding = e.offset > 0
+          if (e.discarding) this.counts.skippedOversize++ // the cut line is skipped; counted so it stays observable
+        } else {
           e.offset = st.size
           if (st.size > 0) e.discarding = (await this.readAt(fh, this.hb, 1, st.size - 1)) === 1 && this.hb[0] !== NL
         }

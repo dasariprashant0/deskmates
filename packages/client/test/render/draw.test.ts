@@ -1,12 +1,12 @@
 import type { Frame, SpriteSheet } from '@deskmates/sprites'
 import { describe, expect, test } from 'vitest'
 import {
-  createBitmapCache, drawCharacter, drawCharacters, drawFloor, drawFurniture, drawRing, drawScene,
+  BITMAP_CACHE_MAX, createBitmapCache, drawCharacter, drawCharacters, drawFloor, drawFurniture, drawRing, drawScene, measure,
   type Ctx2D, type Sprites,
 } from '../../src/render/draw'
 import { BUBBLE_MAX, type CharacterView, type Ring } from '../../src/sim/character'
 import { defaultLayout, VIEW_W } from '../../src/sim/layout'
-import { PAL } from '../../src/render/palette'
+import { PAL, RING_COLOR } from '../../src/render/palette'
 
 type Op = { op: string; args: unknown[] }
 const recorder = (): { ctx: Ctx2D; ops: Op[] } => {
@@ -38,9 +38,9 @@ describe('draw', () => {
 
   test('empty list draws nothing and does not throw', () => {
     const r = recorder()
-    expect(() => drawCharacters(r.ctx, [], sprites, cache(), 0)).not.toThrow()
+    expect(() => drawCharacters(r.ctx, [], sprites, cache())).not.toThrow()
     expect(r.ops).toHaveLength(0)
-    expect(() => drawScene(r.ctx, defaultLayout, [], sprites, cache(), 0)).not.toThrow()
+    expect(() => drawScene(r.ctx, defaultLayout, [], sprites, cache())).not.toThrow()
   })
 
   test('draw order is back to front (sorted by y)', () => {
@@ -49,14 +49,14 @@ describe('draw', () => {
     const seen: number[] = []
     const c2 = cache()
     const tracked = { get: (n: string, ...rest: [string, never, number, Frame]) => { seen.push(n.charCodeAt(0)); return c2.get(n, ...rest) } }
-    drawCharacters(r.ctx, names, sprites, tracked, 0)
+    drawCharacters(r.ctx, names, sprites, tracked)
     expect(seen.map((n) => String.fromCharCode(n))).toEqual(['a', 'b', 'c'])
     expect(r.ops.filter((o) => o.op === 'drawImage').map((o) => o.args[2])).toEqual([30 - 23, 60 - 23, 90 - 23])
   })
 
   test('fade sets globalAlpha and resets it', () => {
     const r = recorder()
-    drawCharacter(r.ctx, view({ fade: 0.4 }), sprites, cache(), 0)
+    drawCharacter(r.ctx, view({ fade: 0.4 }), sprites, cache())
     const alphas = r.ops.filter((o) => o.op === 'set:globalAlpha').map((o) => o.args[0])
     expect(alphas[0]).toBe(0.4)
     expect(alphas.at(-1)).toBe(1)
@@ -66,18 +66,18 @@ describe('draw', () => {
     let made = 0
     const cc = createBitmapCache(() => { made++; return {} })
     const r = recorder()
-    drawCharacter(r.ctx, view(), sprites, cc, 0)
-    drawCharacter(r.ctx, view(), sprites, cc, 0)
+    drawCharacter(r.ctx, view(), sprites, cc)
+    drawCharacter(r.ctx, view(), sprites, cc)
     expect(made).toBe(1)
-    drawCharacter(r.ctx, view({ frame: 1 }), sprites, cc, 0)
-    drawCharacter(r.ctx, view({ dir: 'up' }), sprites, cc, 0)
+    drawCharacter(r.ctx, view({ frame: 1 }), sprites, cc)
+    drawCharacter(r.ctx, view({ dir: 'up' }), sprites, cc)
     expect(made).toBe(3)
   })
 
   test('bubble goes through fillText exactly once and is capped; markup stays text', () => {
     const r = recorder()
     const long = '<img src=x onerror=alert(1)> ' + 'x'.repeat(80)
-    drawCharacter(r.ctx, view({ bubble: long }), sprites, cache(), 0)
+    drawCharacter(r.ctx, view({ bubble: long }), sprites, cache())
     const texts = r.ops.filter((o) => o.op === 'fillText').map((o) => String(o.args[0]))
     const bubbles = texts.filter((t) => t !== 'ada')
     expect(bubbles).toHaveLength(1)
@@ -87,7 +87,7 @@ describe('draw', () => {
 
   test('no bubble means only the name tag is drawn', () => {
     const r = recorder()
-    drawCharacter(r.ctx, view(), sprites, cache(), 0)
+    drawCharacter(r.ctx, view(), sprites, cache())
     expect(r.ops.filter((o) => o.op === 'fillText')).toHaveLength(1)
   })
 
@@ -95,28 +95,56 @@ describe('draw', () => {
     const rings: Ring[] = ['working', 'thinking', 'needs-you', 'error', 'done', 'idle']
     const sigs = rings.map((ring) => {
       const r = recorder()
-      drawRing(r.ctx, ring, 50, 60, 0)
+      drawRing(r.ctx, ring, 50, 60)
       return r.ops.map((o) => o.op + JSON.stringify(o.args)).join('|')
     })
     expect(sigs[5]).toBe('')
     expect(new Set(sigs).size).toBe(6)
     const dash = (ring: Ring) => {
       const r = recorder()
-      drawRing(r.ctx, ring, 50, 60, 0)
+      drawRing(r.ctx, ring, 50, 60)
       return r.ops.filter((o) => o.op === 'setLineDash').map((o) => JSON.stringify(o.args))
     }
     expect(dash('thinking')).toContain('[[1,2]]')
     expect(dash('working')).not.toContain('[[1,2]]')
   })
 
-  test('needs-you ! mark pulses', () => {
-    const marks = (tick: number) => {
+  test('needs-you ! mark is static (no blink)', () => {
+    const marks = () => {
       const r = recorder()
-      drawRing(r.ctx, 'needs-you', 50, 60, tick)
+      drawRing(r.ctx, 'needs-you', 50, 60)
       return r.ops.filter((o) => o.op === 'fillText').length
     }
-    expect(marks(0)).toBe(1)
-    expect(marks(400)).toBe(0)
+    expect(marks()).toBe(1)
+  })
+
+  test('working ring is 2px wide and uses the contrast-checked colour', () => {
+    const r = recorder()
+    drawRing(r.ctx, 'working', 50, 60)
+    expect(r.ops.find((o) => o.op === 'set:lineWidth')?.args[0]).toBe(2)
+    expect(r.ops.find((o) => o.op === 'set:strokeStyle')?.args[0]).toBe(RING_COLOR.working)
+  })
+
+  test('bitmap cache holds at most BITMAP_CACHE_MAX entries and drops the oldest', () => {
+    let made = 0
+    const cc = createBitmapCache(() => { made++; return {} })
+    for (let i = 0; i < BITMAP_CACHE_MAX + 5; i++) cc.get(`n${i}`, 'idle', 'down', 0, frame)
+    expect(made).toBe(BITMAP_CACHE_MAX + 5)
+    cc.get(`n${BITMAP_CACHE_MAX + 4}`, 'idle', 'down', 0, frame)
+    expect(made).toBe(BITMAP_CACHE_MAX + 5)
+    cc.get('n0', 'idle', 'down', 0, frame)
+    expect(made).toBe(BITMAP_CACHE_MAX + 6)
+  })
+
+  test('measure memoises by font and text per context', () => {
+    let calls = 0
+    const c = { font: '8px monospace', measureText: (t: string) => { calls++; return { width: t.length } } } as unknown as Ctx2D
+    expect(measure(c, 'abc')).toBe(3)
+    expect(measure(c, 'abc')).toBe(3)
+    expect(calls).toBe(1)
+    c.font = '9px monospace'
+    measure(c, 'abc')
+    expect(calls).toBe(2)
   })
 })
 
@@ -137,7 +165,7 @@ describe('label placement', () => {
   const bubble = 'x'.repeat(24)
   test.each([0, VIEW_W, 3, VIEW_W - 3])('bubble and name tag stay inside the view for x=%i', (x) => {
     const r = recorder()
-    drawCharacter(r.ctx, view({ x, y: 80, bubble, name: 'a-long-name-here' }), sprites, cache(), 0)
+    drawCharacter(r.ctx, view({ x, y: 80, bubble, name: 'a-long-name-here' }), sprites, cache())
     const tags = fills(r.ops).filter((f) => f.color === PAL.bubbleBg || f.color === PAL.tagBg)
     expect(tags).toHaveLength(2)
     for (const t of tags) {
@@ -147,7 +175,7 @@ describe('label placement', () => {
   })
   test('bubble sits above the name tag without overlapping', () => {
     const r = recorder()
-    drawCharacter(r.ctx, view({ x: 160, y: 80, bubble: 'hello' }), sprites, cache(), 0)
+    drawCharacter(r.ctx, view({ x: 160, y: 80, bubble: 'hello' }), sprites, cache())
     const f = fills(r.ops)
     const b = f.find((t) => t.color === PAL.bubbleBg)
     const n = f.find((t) => t.color === PAL.tagBg)
@@ -155,13 +183,13 @@ describe('label placement', () => {
   })
   test('near the top the bubble moves below the feet instead of clipping', () => {
     const r = recorder()
-    drawCharacter(r.ctx, view({ x: 160, y: 30, bubble: 'hello' }), sprites, cache(), 0)
+    drawCharacter(r.ctx, view({ x: 160, y: 30, bubble: 'hello' }), sprites, cache())
     const b = fills(r.ops).find((t) => t.color === PAL.bubbleBg)
     expect(b?.y).toBeGreaterThanOrEqual(0)
   })
   test('colliding characters get non-overlapping labels', () => {
     const r = recorder()
-    drawCharacters(r.ctx, [view({ key: 'a', name: 'aa', x: 100, y: 80, bubble: 'one' }), view({ key: 'b', name: 'bb', x: 104, y: 82, bubble: 'two' })], sprites, cache(), 0)
+    drawCharacters(r.ctx, [view({ key: 'a', name: 'aa', x: 100, y: 80, bubble: 'one' }), view({ key: 'b', name: 'bb', x: 104, y: 82, bubble: 'two' })], sprites, cache())
     const tags = fills(r.ops).filter((f) => f.color === PAL.bubbleBg || f.color === PAL.tagBg)
     expect(tags).toHaveLength(4)
     for (let i = 0; i < tags.length; i++) for (let j = i + 1; j < tags.length; j++) expect(overlap(tags[i] as Fill, tags[j] as Fill)).toBe(false)
@@ -171,20 +199,18 @@ describe('label placement', () => {
 describe('selection and reduced motion', () => {
   test('selected character gets a marker shape; others do not', () => {
     const plain = recorder()
-    drawCharacter(plain.ctx, view(), sprites, cache(), 0)
+    drawCharacter(plain.ctx, view(), sprites, cache())
     const sel = recorder()
-    drawCharacter(sel.ctx, view(), sprites, cache(), 0, { selectedKey: 'k' })
+    drawCharacter(sel.ctx, view(), sprites, cache(), { selectedKey: 'k' })
     const other = recorder()
-    drawCharacter(other.ctx, view(), sprites, cache(), 0, { selectedKey: 'zzz' })
+    drawCharacter(other.ctx, view(), sprites, cache(), { selectedKey: 'zzz' })
     expect(sel.ops.length).toBeGreaterThan(plain.ops.length)
     expect(other.ops.length).toBe(plain.ops.length)
     expect(fills(sel.ops).some((f) => f.color === PAL.accent)).toBe(true)
   })
-  test('reduced motion keeps the ! visible at every tick', () => {
-    for (const tick of [0, 400, 800, 1200]) {
-      const r = recorder()
-      drawRing(r.ctx, 'needs-you', 50, 60, tick, true)
-      expect(r.ops.filter((o) => o.op === 'fillText')).toHaveLength(1)
-    }
+  test('the ! is drawn with the character regardless of time', () => {
+    const r = recorder()
+    drawCharacter(r.ctx, view({ ring: 'needs-you' }), sprites, cache())
+    expect(r.ops.filter((o) => o.op === 'fillText' && o.args[0] === '!')).toHaveLength(1)
   })
 })

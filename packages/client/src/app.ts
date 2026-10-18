@@ -1,16 +1,16 @@
 // Browser entry. The only file that touches window, document and location.
-import type { AgentState } from '@deskmates/core'
 import { generateSprite, type Frame, type SpriteSheet } from '@deskmates/sprites'
 import { createDemo, createConnection, createMirror, demoSnapshot, isDemo, readToken, stripFragment, type Mirror, type Status } from './index'
 import { asPriceTable, formatTokens } from './hud/cost'
-import { cycleKey, shortDir, summarize, type AgentRow, type Summary } from './hud/summary'
-import { createBitmapCache, drawScene, type Ctx2D } from './render/draw'
+import { createAnnouncer } from './hud/announce'
+import { cycleKey, describeTotals, shortDir, summarize, type AgentRow, type Summary } from './hud/summary'
+import { createBitmapCache, drawCharacters, drawFloor, drawFurniture, type Ctx2D } from './render/draw'
 import { fitScale } from './render/fit'
 import { drawHud, type ChipHit } from './render/hud'
-import { pickCharacter, toView } from './render/pick'
+import { isPointerClick, minBoxView, pickCharacter, toView } from './render/pick'
 import { createLoop } from './render/loop'
 import { PAL } from './render/palette'
-import { deriveName, defaultLayout, createSim, VIEW_H, VIEW_W, type Sim } from './sim'
+import { defaultLayout, createSim, VIEW_H, VIEW_W, type Sim } from './sim'
 
 const el = <T extends HTMLElement>(id: string, type: new () => T): T => {
   const e = document.getElementById(id)
@@ -19,6 +19,7 @@ const el = <T extends HTMLElement>(id: string, type: new () => T): T => {
 }
 const canvas = el('office', HTMLCanvasElement)
 const agentsEl = el('agents', HTMLElement)
+const summaryEl = el('summary', HTMLElement)
 const liveEl = el('live', HTMLElement)
 const statusEl = el('status', HTMLElement)
 const badgeEl = el('badge', HTMLElement)
@@ -92,6 +93,20 @@ const offCtx = off.getContext('2d')
 const ctx = canvas.getContext('2d')
 if (!offCtx || !ctx) throw new Error('canvas 2d unavailable')
 const offDraw: Ctx2D = offCtx
+// Floor and furniture never change for a given layout: draw them once and blit every frame.
+const staticOff = document.createElement('canvas')
+staticOff.width = VIEW_W
+staticOff.height = VIEW_H
+const staticCtx = staticOff.getContext('2d')
+if (!staticCtx) throw new Error('canvas 2d unavailable')
+const staticDraw: Ctx2D = staticCtx
+let staticLayout: typeof defaultLayout | undefined
+const renderStatic = (layout: typeof defaultLayout): void => {
+  if (staticLayout === layout) return
+  staticLayout = layout
+  drawFloor(staticDraw)
+  drawFurniture(staticDraw, layout)
+}
 
 const resize = (): void => {
   const dpr = window.devicePixelRatio || 1
@@ -102,29 +117,13 @@ window.addEventListener('resize', resize)
 resize()
 
 // ---- DOM mirror and announcements -------------------------------------------------------------
-const wording = (a: AgentState): string => (a.status === 'waiting' || a.attention ? 'needs you' : a.status)
-const ended = (a: AgentState): boolean => a.endedAt !== undefined && (a.status === 'done' || a.status === 'error')
-const prev = new Map<string, string>()
+const announcer = createAnnouncer()
 let listSig = ''
-let pending: string | undefined
-let lastAnnounce = -Infinity
 
-const updateMirror = (now: number): void => {
-  const st = mirror.state()
-  const rows: string[] = []
-  const alerts: string[] = []
-  const seen = new Set<string>()
-  for (const key of st.order) {
-    const a = st.agents[key]
-    if (!a || ended(a) || seen.has(key)) continue
-    seen.add(key)
-    const w = wording(a)
-    rows.push(`${deriveName(a)}: ${w}${a.currentTool ? `, ${a.currentTool.summary}` : ''}`)
-    const before = prev.get(key)
-    if (before !== w && (w === 'needs you' || w === 'error')) alerts.push(`${deriveName(a)} ${w === 'error' ? 'hit an error' : 'needs you'}`)
-    prev.set(key, w)
-  }
-  for (const k of [...prev.keys()]) if (!seen.has(k)) prev.delete(k)
+/** The sr-only list and the alerts both come from the summary, so keyboard selection, list and alerts agree. */
+const updateMirror = (sm: Summary): void => {
+  const rows = sm.agents.map((a) => `${a.name}: ${a.status}${a.tool ? `, ${a.tool}` : ''}`)
+  announcer.observe(sm.agents)
   const sig = rows.join('\n')
   if (sig !== listSig) {
     listSig = sig
@@ -135,12 +134,6 @@ const updateMirror = (now: number): void => {
         return li
       }),
     )
-  }
-  if (alerts.length > 0) pending = alerts.join('. ')
-  if (pending !== undefined && now - lastAnnounce >= 2000) {
-    liveEl.textContent = pending
-    pending = undefined
-    lastAnnounce = now
   }
 }
 
@@ -166,13 +159,17 @@ const fillCard = (r: AgentRow): void => {
   setText(cardFields.elapsed, r.elapsedLabel)
   setText(cardFields.subs, String(r.subagents))
 }
-const closeCard = (): void => { cardEl.hidden = true }
+/** Hides the card; if focus is inside it, focus goes back to the canvas first so it is never lost. */
+const closeCard = (): void => {
+  if (cardEl.contains(document.activeElement)) canvas.focus()
+  cardEl.hidden = true
+}
 const select = (key: string | undefined, open = false): void => {
   selectedKey = key
   const r = summary.agents.find((a) => a.key === key)
   if (!r) { closeCard(); return }
-  liveEl.textContent = `${r.name}: ${r.status}`
-  if (open) { fillCard(r); cardEl.hidden = false }
+  announcer.say(`${r.name}: ${r.status}`)
+  if (open) { fillCard(r); cardEl.hidden = false; cardFields.name.focus() }
   else if (cardOpen()) fillCard(r)
 }
 const refreshSelection = (): void => {
@@ -187,7 +184,12 @@ canvas.addEventListener('keydown', (e) => {
   switch (e.key) {
     case 'ArrowRight': case 'ArrowDown': select(cycleKey(keys, selectedKey, 1)); break
     case 'ArrowLeft': case 'ArrowUp': select(cycleKey(keys, selectedKey, -1)); break
-    case 'n': case 'N': select(cycleKey(summary.needsYou.map((r) => r.key), selectedKey, 1)); break
+    case 'n': case 'N': {
+      const next = cycleKey(summary.needsYou.map((r) => r.key), selectedKey, 1)
+      if (next === undefined) announcer.say('No agents need you')
+      else select(next)
+      break
+    }
     case 'Enter': case ' ': select(selectedKey ?? keys[0], true); break
     default: return
   }
@@ -199,19 +201,26 @@ document.addEventListener('keydown', (e) => {
 })
 cardClose.addEventListener('click', () => { closeCard(); canvas.focus() })
 canvas.addEventListener('click', (e) => {
+  if (!isPointerClick(e)) return // Enter can fire a synthetic click at the centre; keydown handles Enter
   const dpr = window.devicePixelRatio || 1
   const b = canvas.getBoundingClientRect()
   const px = (e.clientX - b.left) * dpr
   const py = (e.clientY - b.top) * dpr
   const chip = hudHits.find((h) => px >= h.x && px <= h.x + h.w && py >= h.y && py <= h.y + h.h)
   if (chip) { select(chip.key, true); return }
-  const v = toView(currentFit(), px, py)
-  const key = pickCharacter(sim.characters(), v.x, v.y)
+  const f = currentFit()
+  const v = toView(f, px, py)
+  const key = pickCharacter(sim.characters(), v.x, v.y, minBoxView(f.scale, dpr))
   if (key === undefined) { selectedKey = undefined; closeCard() } else select(key, true)
 })
 
 // ---- loop -------------------------------------------------------------------------------------
 const nowMs = (): number => (isDemoMode ? performance.now() : Date.now())
+
+const REFRESH_MS = 250
+let lastSeq = -1
+let lastRefresh = -Infinity
+let lastTotals = ''
 
 const draw = (): void => {
   const now = nowMs()
@@ -222,12 +231,23 @@ const draw = (): void => {
     if (first && last) mirror.applyEvents({ type: 'events', fromSeq: first.seq, toSeq: last.seq, events })
   }
   sim.sync(mirror.state(), now)
-  updateMirror(now)
-  const raw = mirror.prices()
-  if (raw !== rawPrices) { rawPrices = raw; priceTable = asPriceTable(raw) }
-  summary = summarize(mirror.state(), priceTable, mirror.pricesAreExample(), now)
-  refreshSelection()
-  drawScene(offDraw, defaultLayout, sim.characters(), sprites, cache, performance.now(), { reducedMotion: motion.matches, selectedKey })
+  // Summary, DOM mirror and card only change with new events; the timer covers elapsed labels and the ended-agent grace.
+  if (mirror.seq() !== lastSeq || now - lastRefresh >= REFRESH_MS) {
+    lastSeq = mirror.seq()
+    lastRefresh = now
+    const raw = mirror.prices()
+    if (raw !== rawPrices) { rawPrices = raw; priceTable = asPriceTable(raw) }
+    summary = summarize(mirror.state(), priceTable, mirror.pricesAreExample(), now)
+    updateMirror(summary)
+    const totals = describeTotals(summary.totals)
+    if (totals !== lastTotals) { lastTotals = totals; summaryEl.textContent = totals }
+    refreshSelection()
+  }
+  const say = announcer.flush(now)
+  if (say !== undefined) liveEl.textContent = say
+  renderStatic(defaultLayout)
+  offDraw.drawImage(staticOff, 0, 0)
+  drawCharacters(offDraw, sim.characters(), sprites, cache, { selectedKey })
   const f = currentFit()
   ctx.imageSmoothingEnabled = false
   ctx.fillStyle = PAL.bg

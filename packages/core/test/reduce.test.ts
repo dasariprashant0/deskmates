@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { agentKey, emptyState, needsYou, reduce, type AgentRef, type NormalizedEvent, type OfficeState } from '../src/index'
+import { agentKey, emptyState, needsYou, reduce, reduceWith, type AgentRef, type NormalizedEvent, type OfficeState } from '../src/index'
 import { ev, fold, main, type Body } from './helpers'
 
 const mainOf = (s: OfficeState) => s.agents[agentKey(main)]!
@@ -338,5 +338,63 @@ describe('properties', () => {
       expect(fold(events.slice(cut), fold(events.slice(0, cut)))).toEqual(whole)
       expect(fold(events)).toEqual(whole)
     }
+  })
+})
+
+describe('pruning ended agents', () => {
+  const MIN = 60_000
+  const sub = (id: string): AgentRef => ({ ...main, agentId: id })
+  const endAt = (a: AgentRef, ts: number) => ev({ kind: 'agent.end', reason: 'stop' }, a, ts)
+  const poke = (ts: number, a: AgentRef = main) => ev({ kind: 'activity', state: 'typing' }, a, ts)
+
+  it('drops ended agents older than the age limit and keeps order consistent', () => {
+    const a = sub('a'), b = sub('b')
+    let s = fold([poke(0), poke(0, a), poke(0, b), endAt(a, 1000)])
+    expect(Object.keys(s.agents)).toHaveLength(3)
+    s = fold([poke(1000 + 30 * MIN)], s)
+    expect(Object.keys(s.agents)).toHaveLength(3) // exactly at the limit: kept
+    s = fold([poke(1001 + 30 * MIN)], s)
+    expect(Object.keys(s.agents).sort()).toEqual(['claude:s1:b', 'claude:s1:main'])
+    expect(s.order).toEqual(['claude:s1:main', 'claude:s1:b'])
+    expect(s.order.every((k) => k in s.agents)).toBe(true)
+  })
+
+  it('never prunes live agents, however old', () => {
+    const s = fold([poke(0), poke(0, sub('a')), poke(10 * 60 * MIN)])
+    expect(Object.keys(s.agents)).toHaveLength(2)
+  })
+
+  it('caps total agents at 500 by dropping the oldest ended first', () => {
+    const evs = [poke(0)] // live main
+    for (let i = 0; i < 520; i++) evs.push(poke(i, sub(`x${i}`)), endAt(sub(`x${i}`), 1000 + i))
+    const s = fold(evs)
+    expect(Object.keys(s.agents)).toHaveLength(500)
+    expect(s.order).toHaveLength(500)
+    expect(s.agents['claude:s1:main']).toBeDefined()
+    expect(s.agents['claude:s1:x0']).toBeUndefined()
+    expect(s.agents['claude:s1:x519']).toBeDefined()
+  })
+
+  it('keeps live agents even when over the cap', () => {
+    const evs = []
+    for (let i = 0; i < 510; i++) evs.push(poke(i, sub(`l${i}`)))
+    expect(Object.keys(fold(evs).agents)).toHaveLength(510)
+  })
+
+  it('does not drop an ended parent that still has a live child, and unlinks dropped children', () => {
+    const kid = sub('k'), done = sub('d')
+    let s = fold([
+      ev({ kind: 'agent.spawn', depth: 1 }, kid, 0), ev({ kind: 'agent.spawn', depth: 1 }, done, 0), endAt(done, 1), endAt(main, 1),
+    ])
+    s = fold([poke(40 * MIN, kid)], s)
+    expect(s.agents['claude:s1:main']).toBeDefined() // parent of live kid
+    expect(s.agents['claude:s1:d']).toBeUndefined()
+    expect(s.agents['claude:s1:main']!.children).toEqual(['claude:s1:k'])
+  })
+
+  it('reduceWith honours custom limits', () => {
+    const a = sub('a')
+    const s = [poke(0), endAt(a, 10), poke(100)].reduce((st, e) => reduceWith(st, e, { maxEndedAgeMs: 50 }), emptyState())
+    expect(s.agents['claude:s1:a']).toBeUndefined()
   })
 })

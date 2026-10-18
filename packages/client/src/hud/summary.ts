@@ -83,6 +83,12 @@ export function summarize(state: OfficeState, prices: PriceTable, pricesAreExamp
   return { agents, needsYou, totals: t }
 }
 
+/** One plain sentence for the visually hidden summary element. */
+export function describeTotals(t: Totals): string {
+  const cost = formatCost({ usd: t.usd, known: true })
+  return `${t.running} working, ${t.thinking} thinking, ${t.needsYou} need you, ${t.errors} errors. ${formatTokens(t.tokens)} tokens. Estimated cost ${cost}${t.partialCost ? '+' : ''}${t.anyExample ? ' (example prices)' : ''}.`
+}
+
 const HOME = /^(?:\/Users\/[^/]+|\/home\/[^/]+|[A-Za-z]:\\Users\\[^\\]+)/
 const MAX_DIR = 40
 /** Display only: home prefix becomes ~, long paths keep the tail. The result is shown with textContent. */

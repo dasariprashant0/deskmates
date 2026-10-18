@@ -30,6 +30,9 @@ export type Ctx2D = {
 export type Sprites = { get(name: string): SpriteSheet }
 export type BitmapCache = { get(name: string, anim: string, dir: Dir, frame: number, f: Frame): Bitmap }
 
+export const BITMAP_CACHE_MAX = 500
+
+/** Bounded: past BITMAP_CACHE_MAX entries the oldest inserted one is dropped (Map keeps insertion order). */
 export const createBitmapCache = (makeBitmap: (f: Frame) => Bitmap): BitmapCache => {
   const m = new Map<string, Bitmap>()
   return {
@@ -38,11 +41,34 @@ export const createBitmapCache = (makeBitmap: (f: Frame) => Bitmap): BitmapCache
       let b = m.get(k)
       if (!b) {
         b = makeBitmap(f)
+        if (m.size >= BITMAP_CACHE_MAX) {
+          const oldest = m.keys().next()
+          if (!oldest.done) m.delete(oldest.value)
+        }
         m.set(k, b)
       }
       return b
     },
   }
+}
+
+const widths = new WeakMap<object, Map<string, number>>()
+const WIDTHS_MAX = 2000
+/** measureText memoised by font + text for this context (labels repeat every frame). */
+export function measure(c: Ctx2D, text: string): number {
+  let m = widths.get(c)
+  if (!m) {
+    m = new Map()
+    widths.set(c, m)
+  }
+  const k = `${c.font}|${text}`
+  let w = m.get(k)
+  if (w === undefined) {
+    if (m.size >= WIDTHS_MAX) m.clear()
+    w = c.measureText(text).width
+    m.set(k, w)
+  }
+  return w
 }
 
 const rect = (c: Ctx2D, color: string, x: number, y: number, w: number, h: number): void => {
@@ -162,11 +188,11 @@ const line = (c: Ctx2D, pts: [number, number][]): void => {
 }
 
 /** Status ring on the floor plus a mark beside the head. Shape, not colour, tells statuses apart. */
-export function drawRing(c: Ctx2D, ring: Ring, x: number, y: number, tick: number, reducedMotion = false): void {
+export function drawRing(c: Ctx2D, ring: Ring, x: number, y: number): void {
   if (ring === 'idle') return
   c.strokeStyle = RING_COLOR[ring]
   c.fillStyle = RING_COLOR[ring]
-  c.lineWidth = 1
+  c.lineWidth = ring === 'working' ? 2 : 1
   const mx = x + 10
   const my = y - 20
   const ell = (rx: number, ry: number): void => {
@@ -188,12 +214,10 @@ export function drawRing(c: Ctx2D, ring: Ring, x: number, y: number, tick: numbe
       c.setLineDash([])
       ell(9, 4)
       ell(11, 5)
-      if (reducedMotion || Math.floor(tick / 400) % 2 === 0) { // static when reduced motion is on
-        c.font = 'bold 9px monospace'
-        c.textAlign = 'center'
-        c.textBaseline = 'alphabetic'
-        c.fillText('!', mx, my + 4)
-      }
+      c.font = 'bold 9px monospace' // static: a blinking mark would fail WCAG 2.2.2
+      c.textAlign = 'center'
+      c.textBaseline = 'alphabetic'
+      c.fillText('!', mx, my + 4)
       break
     case 'x':
       c.setLineDash([])
@@ -216,7 +240,7 @@ const MARGIN = 2
 const TAG_H = 10
 const TAG_STEP = 11
 
-export type DrawOpts = { reducedMotion?: boolean; selectedKey?: string }
+export type DrawOpts = { selectedKey?: string }
 type Rect = { x: number; y: number; w: number; h: number }
 const hit = (a: Rect, b: Rect): boolean => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
 
@@ -225,10 +249,10 @@ const hit = (a: Rect, b: Rect): boolean => a.x < b.x + b.w && b.x < a.x + a.w &&
  * (it steps by `dir` * 11 px until free). Returns the rect it used.
  */
 function placeTag(c: Ctx2D, text: string, cx: number, baseY: number, dir: 1 | -1, placed: Rect[], bg: string, fg: string): Rect {
-  c.font = '7px monospace'
+  c.font = '8px monospace'
   c.textAlign = 'center'
   c.textBaseline = 'alphabetic'
-  const w = Math.ceil(c.measureText(text).width) + 4
+  const w = Math.ceil(measure(c, text)) + 4
   const x = Math.max(MARGIN, Math.min(Math.round(cx - w / 2), VIEW_W - MARGIN - w))
   let by = baseY
   for (let i = 0; i < 8 && placed.some((p) => hit(p, { x, y: by - 8, w, h: TAG_H })); i++) by += dir * TAG_STEP
@@ -267,7 +291,7 @@ function drawSelection(c: Ctx2D, x: number, y: number): void {
   }
 }
 
-function drawBody(c: Ctx2D, v: CharacterView, sprites: Sprites, cache: BitmapCache, tick: number, o: DrawOpts): void {
+function drawBody(c: Ctx2D, v: CharacterView, sprites: Sprites, cache: BitmapCache, o: DrawOpts): void {
   const x = Math.round(v.x)
   const y = Math.round(v.y)
   c.globalAlpha = v.fade
@@ -275,7 +299,7 @@ function drawBody(c: Ctx2D, v: CharacterView, sprites: Sprites, cache: BitmapCac
   c.beginPath()
   c.ellipse(x, y - 1, 6, 2.5, 0, 0, Math.PI * 2)
   c.fill()
-  drawRing(c, v.ring, x, y, tick, o.reducedMotion === true)
+  drawRing(c, v.ring, x, y)
   const frames = sprites.get(v.name).frames[`${v.anim}:${v.dir}`]
   const f = frames?.[v.frame % (frames.length || 1)]
   if (f) c.drawImage(cache.get(v.name, v.anim, v.dir, v.frame, f), x - SPRITE_W / 2, y - SPRITE_H + 1)
@@ -283,21 +307,21 @@ function drawBody(c: Ctx2D, v: CharacterView, sprites: Sprites, cache: BitmapCac
   c.globalAlpha = 1
 }
 
-export function drawCharacter(c: Ctx2D, v: CharacterView, sprites: Sprites, cache: BitmapCache, tick: number, o: DrawOpts = {}): void {
-  drawBody(c, v, sprites, cache, tick, o)
+export function drawCharacter(c: Ctx2D, v: CharacterView, sprites: Sprites, cache: BitmapCache, o: DrawOpts = {}): void {
+  drawBody(c, v, sprites, cache, o)
   drawLabels(c, v, [])
 }
 
 /** Bodies back to front, then all labels on top so no sprite covers a name or bubble. */
-export function drawCharacters(c: Ctx2D, views: readonly CharacterView[], sprites: Sprites, cache: BitmapCache, tick: number, o: DrawOpts = {}): void {
+export function drawCharacters(c: Ctx2D, views: readonly CharacterView[], sprites: Sprites, cache: BitmapCache, o: DrawOpts = {}): void {
   const sorted = [...views].sort((a, b) => a.y - b.y)
-  for (const v of sorted) drawBody(c, v, sprites, cache, tick, o)
+  for (const v of sorted) drawBody(c, v, sprites, cache, o)
   const placed: Rect[] = []
   for (const v of sorted) drawLabels(c, v, placed)
 }
 
-export function drawScene(c: Ctx2D, layout: Layout, views: readonly CharacterView[], sprites: Sprites, cache: BitmapCache, tick: number, o: DrawOpts = {}): void {
+export function drawScene(c: Ctx2D, layout: Layout, views: readonly CharacterView[], sprites: Sprites, cache: BitmapCache, o: DrawOpts = {}): void {
   drawFloor(c)
   drawFurniture(c, layout)
-  drawCharacters(c, views, sprites, cache, tick, o)
+  drawCharacters(c, views, sprites, cache, o)
 }

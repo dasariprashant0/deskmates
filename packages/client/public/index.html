@@ -7,13 +7,17 @@
 <link rel="stylesheet" href="/app.css">
 </head>
 <body>
-<canvas id="office" tabindex="0" aria-label="Office view of your Claude Code agents. Arrow keys select an agent, Enter opens details, N jumps to agents that need you, Escape closes." aria-describedby="agents"></canvas>
+<main>
+<h1 class="sr-only">deskmates</h1>
+<canvas id="office" tabindex="0" role="application" aria-label="Agent office" aria-describedby="help summary agents"></canvas>
+<p id="help" class="sr-only">Office view of your Claude Code agents. Arrow keys select an agent. Enter or Space opens its details card and moves focus into it. N jumps to agents that need you. Escape closes the card and returns here.</p>
+<p id="summary" class="sr-only"></p>
 <ul id="agents" class="sr-only" role="list"></ul>
 <div id="live" class="sr-only" aria-live="polite"></div>
-<div id="status"></div>
+<div id="status" role="status"></div>
 <div id="badge" hidden></div>
-<aside id="card" role="dialog" aria-label="Agent details" hidden>
-  <h2 id="card-name"></h2>
+<aside id="card" role="dialog" aria-labelledby="card-name" hidden>
+  <h2 id="card-name" tabindex="-1"></h2>
   <dl>
     <dt>Status</dt><dd id="card-status"></dd>
     <dt>Tool</dt><dd id="card-tool"></dd>
@@ -26,6 +30,7 @@
   </dl>
   <button id="card-close" type="button">Close (Esc)</button>
 </aside>
+</main>
 <script src="/app.js" defer></script>
 </body>
 </html>

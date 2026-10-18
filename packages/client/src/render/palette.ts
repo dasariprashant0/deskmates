@@ -28,9 +28,12 @@ export const PAL = {
   books: ['#d55e00', '#0072b2', '#e69f00', '#cc79a7', '#009e73', '#f0e442'],
 } as const
 
-/** Okabe-Ito status colours; every status also has its own shape in draw.ts. */
+/** Both floor tile colours; ring colours need >= 3:1 against each (WCAG 1.4.11, asserted in test/render/hud.test.ts). */
+export const FLOOR_TILES: readonly string[] = [PAL.floorA, PAL.floorB]
+
+/** Okabe-Ito status colours (working lightened from #0072B2 to reach 3:1 on the floor); every status also has its own shape in draw.ts. */
 export const RING_COLOR: Record<Exclude<Ring, 'idle'>, string> = {
-  working: '#0072B2',
+  working: '#2B8FCB',
   thinking: '#CC79A7',
   'needs-you': '#E69F00',
   error: '#D55E00',
