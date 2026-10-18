@@ -1,0 +1,12 @@
+:root { color-scheme: dark light; --bg: #1b1a2e; --fg: #f1ead8; --chip: rgba(13, 12, 26, 0.85); --accent: #ffb454; }
+@media (prefers-color-scheme: light) {
+  :root { --bg: #2d2640; --fg: #f1ead8; --chip: rgba(13, 12, 26, 0.85); }
+}
+html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden; }
+canvas#office { display: block; width: 100vw; height: 100vh; image-rendering: pixelated; }
+canvas#office:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px; }
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0; }
+#status, #badge { position: fixed; top: 8px; padding: 3px 8px; border-radius: 4px; background: var(--chip); color: var(--fg); font: 600 13px/1.4 ui-monospace, Menlo, monospace; }
+#status { left: 8px; }
+#status:empty, #status[hidden], #badge[hidden] { display: none; }
+#badge { right: 8px; border: 1px solid var(--accent); }
