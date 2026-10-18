@@ -30,6 +30,14 @@ const USER_BLOCKS = new Set(['tool_result', 'text', 'image'])
 
 const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v)
 const s = (v: unknown) => (typeof v === 'string' ? v : undefined)
+// Free text from transcripts is capped at parse time so one hostile line cannot bloat state or snapshots.
+const MAX_CWD = 1024
+const MAX_FIELD = 128
+const cap = (v: string | undefined, max: number) => {
+  if (v === undefined || v.length <= max) return v
+  const c = v.charCodeAt(max - 1)
+  return v.slice(0, c >= 0xd800 && c <= 0xdbff ? max - 1 : max) // never end on half a surrogate pair
+}
 const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
 // Only tame identifiers survive, so odd type values can never carry content into diag.
 const label = (kind: 'type' | 'block', v: unknown) => `${kind}=${typeof v === 'string' && /^[a-z_]{1,24}$/.test(v) ? v : 'other'}`
@@ -81,7 +89,7 @@ export const parseLine = (src: SourceRef, line: string, ctx: ParseCtx, now?: num
     const closed: string[] = []
     let newSeenId: string | undefined
 
-    if (startedNow) push('session.start', { cwd: s(o.cwd) ?? '', gitBranch: s(o.gitBranch), model: s(msg.model) })
+    if (startedNow) push('session.start', { cwd: cap(s(o.cwd), MAX_CWD) ?? '', gitBranch: s(o.gitBranch), model: cap(s(msg.model), MAX_FIELD) })
     const user = o.type === 'user'
     const userText = (chars: number) => { push('message', { role: 'user', chars }); push('activity', { state: 'thinking' }) }
     if (typeof msg.content === 'string' && user) userText(msg.content.length)
@@ -91,8 +99,9 @@ export const parseLine = (src: SourceRef, line: string, ctx: ParseCtx, now?: num
       if (!(user ? USER_BLOCKS : ASSISTANT_BLOCKS).has(b.type as string)) { unrecognized(label('block', b.type)); continue }
       if (user) {
         if (b.type === 'tool_result' && typeof b.tool_use_id === 'string') {
-          closed.push(b.tool_use_id)
-          push('tool.end', { toolUseId: b.tool_use_id, isError: b.is_error === true })
+          const id = cap(b.tool_use_id, MAX_FIELD)!
+          closed.push(id)
+          push('tool.end', { toolUseId: id, isError: b.is_error === true })
         } else if (b.type === 'text' && typeof b.text === 'string') userText(b.text.length)
       } else if (b.type === 'thinking') push('activity', { state: 'thinking' })
       else if (b.type === 'text' && typeof b.text === 'string') {
@@ -100,8 +109,9 @@ export const parseLine = (src: SourceRef, line: string, ctx: ParseCtx, now?: num
         push('message', { role: 'assistant', chars: b.text.length })
       } else if (b.type === 'tool_use') {
         if (typeof b.id !== 'string' || typeof b.name !== 'string') { unrecognized('tool_use=incomplete'); continue }
-        opened.push(b.id)
-        push('tool.start', { toolUseId: b.id, name: b.name, summary: summarize(b.name, b.input) })
+        const id = cap(b.id, MAX_FIELD)!
+        opened.push(id)
+        push('tool.start', { toolUseId: id, name: cap(b.name, MAX_FIELD)!, summary: summarize(b.name, b.input) })
         push('activity', { state: toolActivity(b.name) })
       }
     }
@@ -110,7 +120,7 @@ export const parseLine = (src: SourceRef, line: string, ctx: ParseCtx, now?: num
       if (id === undefined || !ctx.seenMessageIds.has(id)) {
         newSeenId = id
         const u = msg.usage
-        push('usage', { model: s(msg.model) ?? '', input: n(u.input_tokens), cacheWrite: n(u.cache_creation_input_tokens),
+        push('usage', { model: cap(s(msg.model), MAX_FIELD) ?? '', input: n(u.input_tokens), cacheWrite: n(u.cache_creation_input_tokens),
           cacheRead: n(u.cache_read_input_tokens), output: n(u.output_tokens) })
       }
     }

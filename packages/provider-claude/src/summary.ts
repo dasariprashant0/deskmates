@@ -34,8 +34,11 @@ const program = (command: string | undefined) => {
 export const summarize = (toolName: string, input: unknown): string => {
   try {
     switch (toolName) {
-      case 'Read': case 'Edit': case 'Write':
-        return label(toolName, base(str(input, 'file_path')))
+      case 'Read': case 'Edit': case 'Write': {
+        const b = base(str(input, 'file_path'))
+        // dotenv-style names carry secrets by convention; show no more than the kind of file.
+        return b === '.env' || b?.startsWith('.env.') ? `${toolName}: .env file` : label(toolName, b)
+      }
       case 'NotebookEdit':
         return label(toolName, base(str(input, 'notebook_path')))
       case 'Bash':

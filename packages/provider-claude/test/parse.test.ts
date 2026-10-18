@@ -105,3 +105,27 @@ describe('usage and tool bookkeeping', () => {
     expect(parseLine(src, l, newParseCtx()).find((x) => x.kind === 'tool.end')).toMatchObject({ isError: true })
   })
 })
+
+describe('parseLine caps free text', () => {
+  test('oversized cwd, model, tool name and ids are truncated', () => {
+    const big = 'x'.repeat(5000)
+    const a = JSON.stringify({ type: 'assistant', timestamp: '2026-01-01T00:00:00.000Z', cwd: big, message: { id: 'm1', model: big,
+      content: [{ type: 'tool_use', id: big, name: big, input: {} }], usage: { input_tokens: 1, output_tokens: 1 } } })
+    const u = JSON.stringify({ type: 'user', timestamp: '2026-01-01T00:00:01.000Z', message: { content: [{ type: 'tool_result', tool_use_id: big }] } })
+    const ctx = newParseCtx()
+    const out = [...parseLine(src, a, ctx), ...parseLine(src, u, ctx)] as Array<Record<string, unknown>>
+    const by = (k: string) => out.find((e) => e.kind === k)!
+    expect((by('session.start').cwd as string).length).toBe(1024)
+    expect((by('session.start').model as string).length).toBe(128)
+    expect((by('usage').model as string).length).toBe(128)
+    const t = by('tool.start')
+    expect((t.name as string).length).toBe(128)
+    expect((t.toolUseId as string).length).toBe(128)
+    expect((by('tool.end').toolUseId as string)).toBe(t.toolUseId) // start and end still match
+  })
+  test('truncation never splits a surrogate pair', () => {
+    const l = JSON.stringify({ type: 'user', timestamp: '2026-01-01T00:00:00.000Z', cwd: 'a'.repeat(1023) + '😀', message: { content: 'hi' } })
+    const cwd = (parseLine(src, l, newParseCtx())[0] as { cwd: string }).cwd
+    expect(cwd).toBe('a'.repeat(1023))
+  })
+})

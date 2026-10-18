@@ -51,3 +51,13 @@ describe('readSubagentMeta', () => {
     expect(await readSubagentMeta(m)).toBeUndefined()
   })
 })
+
+describe('readSubagentMeta caps', () => {
+  test('oversized description and agentType are truncated', async () => {
+    const f = join(root, 'big.meta.json')
+    await writeFile(f, JSON.stringify({ agentType: 'a'.repeat(500), description: 'd'.repeat(5000), toolUseId: 't' }))
+    const m = await readSubagentMeta(f)
+    expect(m?.agentType).toHaveLength(128)
+    expect(m?.description).toHaveLength(256)
+  })
+})

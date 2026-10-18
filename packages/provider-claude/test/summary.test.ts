@@ -6,7 +6,10 @@ describe('summarize', () => {
     expect(summarize('Bash', { command: 'curl -H "Authorization: Bearer sk-FAKE-000" https://x.test/a?k=1' })).toBe('Bash: curl')
   })
   test('file tools keep basename only', () => {
-    expect(summarize('Read', { file_path: '/Users/x/.env' })).toBe('Read: .env')
+    expect(summarize('Read', { file_path: '/Users/x/.env' })).toBe('Read: .env file')
+    expect(summarize('Edit', { file_path: '/a/.env.production' })).toBe('Edit: .env file')
+    expect(summarize('Write', { file_path: '/a/.envrc' })).toBe('Write: .envrc')
+    expect(summarize('Read', { file_path: '/a/env.ts' })).toBe('Read: env.ts')
     expect(summarize('NotebookEdit', { notebook_path: '/a/b/n.ipynb' })).toBe('NotebookEdit: n.ipynb')
   })
   test('WebFetch keeps hostname only', () => {
