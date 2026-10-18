@@ -16,7 +16,7 @@ const mk = (sid: string, o: Partial<AgentState> = {}): AgentState => ({
   openOrder: [],
   usage: { input: 0, cacheWrite: 0, cacheRead: 0, output: 0 },
   startedAt: 0,
-  lastEventAt: 0,
+  lastEventAt: 1_000_000, // the world() clock starts here, so idle and done agents sit inside the active window
   children: [],
   ...o,
 })
