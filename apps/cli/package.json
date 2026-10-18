@@ -3,7 +3,6 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "main": "src/index.ts",
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc -p . --noEmit",
@@ -12,13 +11,11 @@
   "bin": {
     "deskmates": "dist/deskmates.js"
   },
-  "dependencies": {
+  "devDependencies": {
     "@deskmates/client": "workspace:*",
     "@deskmates/core": "workspace:*",
     "@deskmates/provider-claude": "workspace:*",
-    "@deskmates/server": "workspace:*"
-  },
-  "devDependencies": {
+    "@deskmates/server": "workspace:*",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"
   },
