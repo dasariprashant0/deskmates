@@ -20,7 +20,7 @@ describe('resync rate limit', () => {
     let t = 1000
     const bus = new EventBus()
     let port = 0
-    hub = createWsHub({ bus, token: TOKEN, getPort: () => port, getExtras: () => ({ prices: EXAMPLE_PRICES, pricesAreExample: true }), now: () => t })
+    hub = createWsHub({ bus, token: TOKEN, getPort: () => port, getExtras: () => ({ prices: EXAMPLE_PRICES, pricesSource: 'example', pricesAsOf: '2026-10-18' }), now: () => t })
     server = http.createServer()
     server.on('upgrade', hub.handleUpgrade)
     await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
@@ -40,7 +40,7 @@ describe('resync rate limit', () => {
     let t = 1000
     const bus = new EventBus()
     let port = 0
-    hub = createWsHub({ bus, token: TOKEN, getPort: () => port, getExtras: () => ({ prices: EXAMPLE_PRICES, pricesAreExample: true }), now: () => t })
+    hub = createWsHub({ bus, token: TOKEN, getPort: () => port, getExtras: () => ({ prices: EXAMPLE_PRICES, pricesSource: 'example', pricesAsOf: '2026-10-18' }), now: () => t })
     server = http.createServer()
     server.on('upgrade', hub.handleUpgrade)
     await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))

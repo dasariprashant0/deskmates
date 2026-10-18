@@ -1,4 +1,4 @@
-import { EXAMPLE_PRICES } from '@deskmates/core'
+import { DEFAULT_PRICES, EXAMPLE_PRICES } from '@deskmates/core'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -24,37 +24,37 @@ const run = async (content?: string) => {
 const entry = { inputPerMTok: 1, cacheWritePerMTok: 2, cacheReadPerMTok: 0.5, outputPerMTok: 4 }
 
 describe('loadPrices', () => {
-  it('missing file gives the example table, no warning', async () => {
+  it('missing file gives the built-in default table, no warning', async () => {
     const r = await run()
-    expect(r).toMatchObject({ prices: EXAMPLE_PRICES, isExample: true, warns: [] })
+    expect(r).toMatchObject({ prices: DEFAULT_PRICES, isExample: false, source: 'default', warns: [] })
   })
   it('valid file is used', async () => {
     const r = await run(JSON.stringify({ m1: entry }))
-    expect(r.isExample).toBe(false); expect(r.prices['m1']).toEqual(entry); expect(r.warns).toEqual([])
+    expect(r.isExample).toBe(false); expect(r.source).toBe('user'); expect(r.prices['m1']).toEqual(entry); expect(r.warns).toEqual([])
   })
   it('invalid JSON warns once and falls back', async () => {
     const r = await run('{nope')
-    expect(r).toMatchObject({ prices: EXAMPLE_PRICES, isExample: true, warns: ['prices-invalid-json'] })
+    expect(r).toMatchObject({ prices: DEFAULT_PRICES, isExample: false, source: 'default', warns: ['prices-invalid-json'] })
   })
   it.each([['[]'], ['3'], ['null'], [JSON.stringify({ m: { inputPerMTok: 1 } })], [JSON.stringify({ m: 'x' })]])(
     'wrong shape %s warns once', async (c) => {
       const r = await run(c)
-      expect(r).toMatchObject({ prices: EXAMPLE_PRICES, isExample: true, warns: ['prices-invalid-shape'] })
+      expect(r).toMatchObject({ prices: DEFAULT_PRICES, isExample: false, source: 'default', warns: ['prices-invalid-shape'] })
     })
   it.each([[-1], [1_000_001], [null], ['5']])('bad number %s ignores the whole file', async (bad) => {
     const r = await run(JSON.stringify({ good: entry, bad: { ...entry, outputPerMTok: bad } }))
-    expect(r).toMatchObject({ prices: EXAMPLE_PRICES, isExample: true, warns: ['prices-invalid-shape'] })
+    expect(r).toMatchObject({ prices: DEFAULT_PRICES, isExample: false, source: 'default', warns: ['prices-invalid-shape'] })
   })
   it('__proto__ key does not pollute', async () => {
     const r = await run(`{"__proto__":{"inputPerMTok":9,"cacheWritePerMTok":9,"cacheReadPerMTok":9,"outputPerMTok":9},"m":${JSON.stringify(entry)}}`)
     expect(({} as Record<string, unknown>)['inputPerMTok']).toBeUndefined()
     expect((r.prices as Record<string, unknown>)['inputPerMTok']).toBeUndefined()
     expect(r.prices['m']).toEqual(entry)
-    expect(Object.keys(r.prices)).toEqual(['m'])
+    expect(Object.keys(r.prices)).toEqual([...Object.keys(DEFAULT_PRICES), 'm'])
   })
   it('oversized file is ignored with one warning', async () => {
     const r = await run(JSON.stringify({ m: entry, pad: 'x'.repeat(300 * 1024) }))
-    expect(r).toMatchObject({ prices: EXAMPLE_PRICES, isExample: true })
+    expect(r).toMatchObject({ prices: DEFAULT_PRICES, isExample: false, source: 'default' })
     expect(r.warns).toHaveLength(1)
   })
   it('accepts the 0 and 1_000_000 boundaries', async () => {
@@ -64,12 +64,25 @@ describe('loadPrices', () => {
   })
   it('empty file warns invalid-json once', async () => {
     const r = await run('')
-    expect(r.isExample).toBe(true); expect(r.warns).toEqual(['prices-invalid-json'])
+    expect(r.source).toBe('default'); expect(r.warns).toEqual(['prices-invalid-json'])
   })
   it('unreadable path (a directory) warns prices-unreadable', async () => {
     const h = await home(); await mkdir(join(h, '.deskmates', 'prices.json'))
     const warns: string[] = []
     const r = await loadPrices({ homeDir: h, warn: (c) => warns.push(c) })
-    expect(r.isExample).toBe(true); expect(warns).toEqual(['prices-unreadable'])
+    expect(r.source).toBe('default'); expect(warns).toEqual(['prices-unreadable'])
+  })
+  it('user entry wins for one model, the rest stay default', async () => {
+    const r = await run(JSON.stringify({ 'claude-sonnet-4-5': entry }))
+    expect(r.source).toBe('user'); expect(r.isExample).toBe(false)
+    expect(r.prices['claude-sonnet-4-5']).toEqual(entry)
+    expect(r.prices['claude-opus-4-5']).toEqual(DEFAULT_PRICES['claude-opus-4-5'])
+    expect(Object.keys(r.prices)).toHaveLength(Object.keys(DEFAULT_PRICES).length)
+    expect(DEFAULT_PRICES['claude-sonnet-4-5']).not.toEqual(entry) // defaults never mutated
+  })
+  it('reports asOf', async () => { expect((await run()).asOf).toBe('2026-10-18') })
+  it('an explicit example table is source example and isExample', async () => {
+    const r = await loadPrices({ homeDir: await home(), defaults: EXAMPLE_PRICES })
+    expect(r).toMatchObject({ prices: EXAMPLE_PRICES, source: 'example', isExample: true })
   })
 })

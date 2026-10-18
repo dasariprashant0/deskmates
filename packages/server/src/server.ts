@@ -37,13 +37,13 @@ export const startServer = async (opts: ServerOpts): Promise<RunningServer> => {
   let httpConnections = 0
   const startedAt = now()
 
-  const hub = createWsHub({ bus, token: opts.token, homeDir: opts.homeDir ?? os.homedir(), getPort: () => port, getExtras: () => ({ prices: loaded.prices, pricesAreExample: loaded.isExample }) })
+  const hub = createWsHub({ bus, token: opts.token, homeDir: opts.homeDir ?? os.homedir(), getPort: () => port, getExtras: () => ({ prices: loaded.prices, pricesSource: loaded.source, pricesAsOf: loaded.asOf }) })
   let ticker: ReturnType<typeof startTicker> | undefined
   const status = () => ({
     server: { port, startedAt, httpConnections, authFailures: httpAuthFailures + (hub.stats().rejected['bad-host'] ?? 0) + (hub.stats().rejected['bad-origin'] ?? 0) + (hub.stats().rejected['bad-token'] ?? 0) },
     ws: hub.stats(),
     ingest: ingest.status(),
-    prices: { isExample: loaded.isExample, ...(loaded.reason !== undefined && { reason: loaded.reason }) },
+    prices: { isExample: loaded.isExample, pricesSource: loaded.source, ...(loaded.reason !== undefined && { reason: loaded.reason }) },
     ticker: ticker?.stats() ?? { ticks: 0, errors: {} },
   })
 

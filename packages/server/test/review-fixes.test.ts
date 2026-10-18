@@ -48,7 +48,7 @@ describe('ws frame caps', () => {
   })
   const boot = async (bus: EventBus, n: number, o: { maxFrameBytes: number; flushMs?: number }) => {
     let port = 0
-    hub = createWsHub({ bus, token: TOKEN, getPort: () => port, getExtras: () => ({ prices: EXAMPLE_PRICES, pricesAreExample: true }), homeDir: '/Users/nobody', ...o })
+    hub = createWsHub({ bus, token: TOKEN, getPort: () => port, getExtras: () => ({ prices: EXAMPLE_PRICES, pricesSource: 'example', pricesAsOf: '2026-10-18' }), homeDir: '/Users/nobody', ...o })
     server = http.createServer()
     server.on('upgrade', hub.handleUpgrade)
     await new Promise<void>((r) => server!.listen(0, '127.0.0.1', r))

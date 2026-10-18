@@ -1,7 +1,7 @@
 import { homedir } from 'node:os'
 import type http from 'node:http'
 import type stream from 'node:stream'
-import type { AgentState, NormalizedEvent, OfficeState, PriceTable } from '@deskmates/core'
+import type { AgentState, NormalizedEvent, OfficeState, PriceTable, PricesSource } from '@deskmates/core'
 import { WebSocketServer, type WebSocket } from 'ws'
 import type { EventBus } from './bus'
 import { makeRedactor, redactWith } from './redact'
@@ -11,7 +11,7 @@ export type WsOpts = {
   bus: EventBus
   token: string
   getPort: () => number
-  getExtras: () => { prices: PriceTable; pricesAreExample: boolean }
+  getExtras: () => { prices: PriceTable; pricesSource: PricesSource; pricesAsOf: string }
   maxClients?: number
   maxMessageBytes?: number
   flushMs?: number
@@ -113,8 +113,8 @@ export const createWsHub = (opts: WsOpts): WsHub => {
     c.ws.send(text, (err) => { if (err) { count('socket-error'); c.ws.terminate() } })
   }
   const snapshot = (c: Client) => {
-    const { prices, pricesAreExample } = opts.getExtras()
-    const head = { type: 'snapshot', v: 1, seq: opts.bus.seq(), prices, pricesAreExample }
+    const { prices, pricesSource, pricesAsOf } = opts.getExtras()
+    const head = { type: 'snapshot', v: 1, seq: opts.bus.seq(), prices, pricesAreExample: pricesSource === 'example', pricesSource, pricesAsOf }
     sendRaw(c, fitSnapshot(head, redactWith(opts.bus.state(), redact), maxFrame))
   }
   // Serialized event frames, shared by every client whose batch is the same; cleared per flush.

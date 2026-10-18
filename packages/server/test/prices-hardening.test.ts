@@ -1,4 +1,4 @@
-import { EXAMPLE_PRICES } from '@deskmates/core'
+import { DEFAULT_PRICES } from '@deskmates/core'
 import { execFileSync } from 'node:child_process'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -19,11 +19,11 @@ const run = async (content?: string) => {
   return { ...r, warns }
 }
 const e = { inputPerMTok: 1, cacheWritePerMTok: 2, cacheReadPerMTok: 0.5, outputPerMTok: 4 }
-const bad = (reason: string) => ({ isExample: true, prices: EXAMPLE_PRICES, reason, warns: [reason] })
+const bad = (reason: string) => ({ isExample: false, source: 'default', prices: DEFAULT_PRICES, reason, warns: [reason] })
 
 describe('loadPrices hardening (item 8)', () => {
   it('missing file reports reason missing and no warning', async () => {
-    expect(await run()).toMatchObject({ isExample: true, reason: 'missing', warns: [] })
+    expect(await run()).toMatchObject({ isExample: false, source: 'default', reason: 'missing', warns: [] })
   })
   it('valid file has no reason', async () => {
     const r = await run(JSON.stringify({ m: e }))
@@ -55,16 +55,16 @@ describe('loadPrices hardening (item 8)', () => {
     expect(await run('{"m":{"inputPerMTok":1e999,"cacheWritePerMTok":1,"cacheReadPerMTok":1,"outputPerMTok":1}}')).toMatchObject(bad('prices-invalid-shape'))
   })
   it('an empty object file is valid and not an example', async () => {
-    const r = await run('{}'); expect(r.isExample).toBe(false); expect(Object.keys(r.prices)).toEqual([])
+    const r = await run('{}'); expect(r.isExample).toBe(false); expect(r.prices).toEqual(DEFAULT_PRICES); expect(r.source).toBe('user')
   })
   it('__proto__ is skipped before validation, even with a junk value', async () => {
     const r = await run(`{"__proto__":5,"m":${JSON.stringify(e)}}`)
-    expect(r.isExample).toBe(false); expect(Object.keys(r.prices)).toEqual(['m'])
+    expect(r.isExample).toBe(false); expect(Object.keys(r.prices)).toEqual([...Object.keys(DEFAULT_PRICES), 'm'])
   })
   it('a directory at the path is unreadable', async () => {
     const h = await home(); await mkdir(join(h, '.deskmates', 'prices.json'))
     const warns: string[] = []
-    expect(await loadPrices({ homeDir: h, warn: (c) => warns.push(c) })).toMatchObject({ isExample: true, reason: 'prices-unreadable' })
+    expect(await loadPrices({ homeDir: h, warn: (c) => warns.push(c) })).toMatchObject({ isExample: false, source: 'default', reason: 'prices-unreadable' })
     expect(warns).toEqual(['prices-unreadable'])
   })
   it('a FIFO at the path does not block and is unreadable', async () => {
@@ -72,7 +72,7 @@ describe('loadPrices hardening (item 8)', () => {
     try { execFileSync('mkfifo', [f]) } catch { return } // mkfifo unavailable: skip
     const warns: string[] = []
     const r = await loadPrices({ homeDir: h, warn: (c) => warns.push(c) })
-    expect(r).toMatchObject({ isExample: true, reason: 'prices-unreadable' })
+    expect(r).toMatchObject({ isExample: false, source: 'default', reason: 'prices-unreadable' })
     expect(warns).toEqual(['prices-unreadable'])
   }, 3000)
 })
