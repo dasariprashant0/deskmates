@@ -44,7 +44,7 @@ function items(t: Totals, level: Level, u: number, hidden: number): Item[] {
   const counts: [Kind, number, string, string][] = [['working', t.running, 'working', 'w'], ['thinking', t.thinking, 'thinking', 't'], ['needs', t.needsYou, 'needs you', '!'], ['error', t.errors, 'errors', 'x']]
   const out: Item[] = counts.map(([kind, n, long, short]) => ({ kind, text: level === 0 ? `${n} ${long}` : `${n}${short}`, color: HUD.text, lead: 0 }))
   if (level < 2) out.push({ text: `${formatTokens(t.tokens)}${level === 0 ? ' tokens' : ' tok'}`, color: HUD.text, lead: 0 })
-  out.push({ text: `${level === 0 ? 'cost ' : ''}${formatCost({ usd: t.usd, known: true })}${t.partialCost ? '+' : ''}`, color: HUD.text, lead: 0 })
+  out.push({ text: `${level === 0 ? 'cost ' : ''}${formatCost({ usd: t.usd, known: true })}${t.partialCost ? '+' : ''}${t.prices.source === 'default' ? ' est.' : ''}`, color: HUD.text, lead: 0 })
   if (hidden > 0) out.push({ text: level === 0 ? `+${hidden} idle` : `+${hidden}`, color: HUD.dim, lead: 0 })
   if (t.anyExample) out.push({ text: level === 0 ? 'example prices' : '(ex)', color: HUD.dim, lead: Math.round(6 * u) })
   return out

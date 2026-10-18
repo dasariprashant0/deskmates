@@ -1,6 +1,6 @@
-import { EXAMPLE_PRICES, type PriceTable } from '@deskmates/core'
+import { DEFAULT_PRICES, EXAMPLE_PRICES, type PriceTable } from '@deskmates/core'
 import { describe, expect, test } from 'vitest'
-import { asPriceTable, estimateCost, formatCost, formatElapsed, formatTokens, formatUsd } from '../../src/hud/cost'
+import { asPriceTable, estimateCost, formatCost, formatElapsed, formatTokens, formatUsd, pricesNote } from '../../src/hud/cost'
 
 const T: PriceTable = { m: { inputPerMTok: 3, cacheWritePerMTok: 3.75, cacheReadPerMTok: 0.3, outputPerMTok: 15 } }
 const U = (n: number) => ({ input: n, cacheWrite: n, cacheRead: n, output: n })
@@ -68,5 +68,27 @@ describe('formatters', () => {
     expect(formatElapsed(3_720_000)).toBe('1h 02m')
     expect(formatElapsed(-5)).toBe('0s')
     expect(formatElapsed(NaN)).toBe('0s')
+  })
+})
+
+describe('estimateCost model id normalization', () => {
+  const P = { 'claude-sonnet-4-5': { inputPerMTok: 3, cacheWritePerMTok: 3.75, cacheReadPerMTok: 0.3, outputPerMTok: 15 } }
+  const one = { input: 1_000_000, cacheWrite: 0, cacheRead: 0, output: 0 }
+  test.each(['claude-sonnet-4-5-20250929', 'claude-sonnet-4-5[1m]', 'Claude-Sonnet-4-5-20250929[1m]', 'claude-sonnet-4-5'])('%s finds the entry', (m) => {
+    expect(estimateCost(one, m, P)).toEqual({ usd: 3, known: true })
+  })
+  test('synthetic, unknown, empty and prototype keys stay unknown', () => {
+    for (const m of ['<synthetic>', 'claude-unknown-9', '', '__proto__', 'constructor']) expect(estimateCost(one, m, P)).toEqual({ usd: 0, known: false })
+  })
+  test('built-in defaults price a real dated id', () => {
+    expect(estimateCost(one, 'claude-opus-4-1-20250805', DEFAULT_PRICES)).toEqual({ usd: 15, known: true })
+  })
+})
+
+describe('pricesNote', () => {
+  test('per source', () => {
+    expect(pricesNote({ source: 'default', asOf: '2026-10-18' })).toBe('Estimated from built-in prices as of 2026-10-18; override in ~/.deskmates/prices.json')
+    expect(pricesNote({ source: 'user', asOf: '2026-10-18' })).toBe('Estimated from your prices.json')
+    expect(pricesNote({ source: 'example', asOf: '2026-10-18' })).toBe('')
   })
 })

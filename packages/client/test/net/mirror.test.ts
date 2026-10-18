@@ -81,3 +81,19 @@ describe('mirror', () => {
     expect(m.stats()).toEqual({ snapshots: 1, batches: 3, gaps: 1, stale: 1, invalid: 0 })
   })
 })
+
+describe('mirror price provenance', () => {
+  test('defaults to example until a snapshot says otherwise', () => {
+    const m = createMirror()
+    expect(m.pricesSource()).toBe('example')
+    m.applySnapshot({ ...snap(1), pricesAreExample: false, pricesSource: 'default', pricesAsOf: '2026-10-18' })
+    expect(m.pricesSource()).toBe('default'); expect(m.pricesAsOf()).toBe('2026-10-18'); expect(m.pricesAreExample()).toBe(false)
+  })
+  test('older server without pricesSource: derived from pricesAreExample', () => {
+    const m = createMirror()
+    m.applySnapshot({ ...snap(1), pricesAreExample: false })
+    expect(m.pricesSource()).toBe('user')
+    m.applySnapshot({ ...snap(2), pricesAreExample: true })
+    expect(m.pricesSource()).toBe('example')
+  })
+})
