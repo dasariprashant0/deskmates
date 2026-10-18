@@ -62,7 +62,23 @@ interface Provider {
 ```
 
 - Tool name to activity is a per-provider table (Read, Grep, Glob -> reading; Edit, Write, NotebookEdit -> editing; Bash -> running; WebSearch, WebFetch -> searching).
-- Cost is never an event. It is derived in a selector from `usage` and a versioned `prices.json`. Unknown models show tokens only.
+- Cost is never an event. It is derived from `usage` and a price table. Unknown models show tokens only and mark the total with `+`.
+
+### Cost estimates and prices
+
+Costs are **estimates**: tokens x USD per million tokens. The HUD shows `~$X`, and `est.` when the built-in table is used.
+
+- **Built-in table.** `DEFAULT_PRICES` in `packages/core/src/prices.ts` holds the Claude models (Fable, Mythos, Opus, Sonnet, Haiku) with input, 5-minute cache write, cache read and output prices. It is dated by `PRICES_AS_OF` (currently 2026-10-18). `claude-haiku-5-5` uses the up-to-100K-prompt tier; the higher long-prompt tier is not modeled.
+- **Model ids** are normalized before lookup (`normalizeModelId`): lowercased, trailing `[1m]`-style suffix and trailing `-YYYYMMDD` date removed. So `claude-sonnet-4-5-20250929` prices as `claude-sonnet-4-5`. Unknown ids (and `<synthetic>`) are cost unknown.
+- **Override.** Create `~/.deskmates/prices.json`, keyed by normalized model id:
+
+  ```json
+  { "claude-sonnet-4-5": { "inputPerMTok": 3, "cacheWritePerMTok": 3.75, "cacheReadPerMTok": 0.3, "outputPerMTok": 15 } }
+  ```
+
+  The file is **merged over** the built-in table: your entry wins for that model, every other model keeps its built-in price, and you can add models the table lacks. All four numbers must be 0 to 1,000,000; one bad entry, bad JSON or a file over 256 KB ignores the whole file (built-ins are used, a warning code is logged). The HUD then says "Estimated from your prices.json".
+- **Source reported to the client.** Snapshots carry `pricesSource` (`default` | `user` | `example`) and `pricesAsOf`; `/api/status` reports `pricesSource`. `example` is only the demo and tests.
+- **Refreshing the table.** Re-read https://platform.claude.com/docs/en/about-claude/pricing, update `DEFAULT_PRICES` and `PRICES_AS_OF` in `packages/core/src/prices.ts` (the core tests check key normalization and spot prices), and update the date above.
 - Agents are keyed by (file path, sessionId, agentId), never by sessionId alone.
 
 ## State store and transport
@@ -82,7 +98,7 @@ interface Provider {
 ## Monorepo layout (pnpm workspaces)
 
 ```
-packages/core/            events.ts reduce.ts selectors.ts prices.json layout.ts
+packages/core/            events.ts reduce.ts selectors.ts prices.ts layout.ts
 packages/provider-claude/ parse.ts discover.ts hooks.ts fixtures/
 packages/server/          watch.ts bus.ts ws.ts hookIngress.ts recorder.ts ticker.ts
 packages/client/          sim/ render/ ui/ replay/
