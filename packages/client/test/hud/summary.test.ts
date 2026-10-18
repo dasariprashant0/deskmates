@@ -88,3 +88,18 @@ describe('describeTotals', () => {
     expect(describeTotals(s.totals)).not.toContain('example')
   })
 })
+
+describe('numbered names and hidden text', () => {
+  test('rows use the full numbered name and keep a short one', () => {
+    const p = mk('s', { startedAt: 1 })
+    const subs = [1, 2].map((i) => ({ ...mk('s', { startedAt: 10 + i }), key: `t:s:g${i}`, ref: { provider: 't', sessionId: 's', agentId: `g${i}` }, agentType: 'general-purpose', parentKey: p.key }))
+    const sm = summarize({ agents: Object.fromEntries([p, ...subs].map((a) => [a.key, a])), order: [p.key, ...subs.map((a) => a.key)], seq: 0 }, EXAMPLE_PRICES, true, NOW)
+    expect(sm.agents.map((r) => r.name)).toEqual(['proj', 'general-purpose #1', 'general-purpose #2'])
+    expect(sm.agents.map((r) => r.short)).toEqual(['proj', 'agent #1', 'agent #2'])
+  })
+  test('describeTotals mentions hidden sessions only when there are some', () => {
+    const t = summarize({ agents: {}, order: [], seq: 0 }, EXAMPLE_PRICES, true, NOW).totals
+    expect(describeTotals(t)).not.toContain('not shown')
+    expect(describeTotals(t, 12)).toContain('12 more sessions not shown because they are idle or finished')
+  })
+})
