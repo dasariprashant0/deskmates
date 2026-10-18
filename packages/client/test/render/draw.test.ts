@@ -5,7 +5,8 @@ import {
   type Ctx2D, type Sprites,
 } from '../../src/render/draw'
 import { BUBBLE_MAX, type CharacterView, type Ring } from '../../src/sim/character'
-import { defaultLayout } from '../../src/sim/layout'
+import { defaultLayout, VIEW_W } from '../../src/sim/layout'
+import { PAL } from '../../src/render/palette'
 
 type Op = { op: string; args: unknown[] }
 const recorder = (): { ctx: Ctx2D; ops: Op[] } => {
@@ -116,5 +117,74 @@ describe('draw', () => {
     }
     expect(marks(0)).toBe(1)
     expect(marks(400)).toBe(0)
+  })
+})
+
+// ---- slice 2: bubble clamping, stacking, selection, reduced motion ---------------------------------
+type Fill = { color: unknown; x: number; y: number; w: number; h: number }
+const fills = (ops: Op[]): Fill[] => {
+  let color: unknown
+  const out: Fill[] = []
+  for (const o of ops) {
+    if (o.op === 'set:fillStyle') color = o.args[0]
+    if (o.op === 'fillRect') out.push({ color, x: o.args[0] as number, y: o.args[1] as number, w: o.args[2] as number, h: o.args[3] as number })
+  }
+  return out
+}
+const overlap = (a: Fill, b: Fill): boolean => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
+
+describe('label placement', () => {
+  const bubble = 'x'.repeat(24)
+  test.each([0, VIEW_W, 3, VIEW_W - 3])('bubble and name tag stay inside the view for x=%i', (x) => {
+    const r = recorder()
+    drawCharacter(r.ctx, view({ x, y: 80, bubble, name: 'a-long-name-here' }), sprites, cache(), 0)
+    const tags = fills(r.ops).filter((f) => f.color === PAL.bubbleBg || f.color === PAL.tagBg)
+    expect(tags).toHaveLength(2)
+    for (const t of tags) {
+      expect(t.x).toBeGreaterThanOrEqual(2)
+      expect(t.x + t.w).toBeLessThanOrEqual(VIEW_W - 2)
+    }
+  })
+  test('bubble sits above the name tag without overlapping', () => {
+    const r = recorder()
+    drawCharacter(r.ctx, view({ x: 160, y: 80, bubble: 'hello' }), sprites, cache(), 0)
+    const f = fills(r.ops)
+    const b = f.find((t) => t.color === PAL.bubbleBg)
+    const n = f.find((t) => t.color === PAL.tagBg)
+    expect(b && n && !overlap(b, n) && b.y < n.y).toBe(true)
+  })
+  test('near the top the bubble moves below the feet instead of clipping', () => {
+    const r = recorder()
+    drawCharacter(r.ctx, view({ x: 160, y: 30, bubble: 'hello' }), sprites, cache(), 0)
+    const b = fills(r.ops).find((t) => t.color === PAL.bubbleBg)
+    expect(b?.y).toBeGreaterThanOrEqual(0)
+  })
+  test('colliding characters get non-overlapping labels', () => {
+    const r = recorder()
+    drawCharacters(r.ctx, [view({ key: 'a', name: 'aa', x: 100, y: 80, bubble: 'one' }), view({ key: 'b', name: 'bb', x: 104, y: 82, bubble: 'two' })], sprites, cache(), 0)
+    const tags = fills(r.ops).filter((f) => f.color === PAL.bubbleBg || f.color === PAL.tagBg)
+    expect(tags).toHaveLength(4)
+    for (let i = 0; i < tags.length; i++) for (let j = i + 1; j < tags.length; j++) expect(overlap(tags[i] as Fill, tags[j] as Fill)).toBe(false)
+  })
+})
+
+describe('selection and reduced motion', () => {
+  test('selected character gets a marker shape; others do not', () => {
+    const plain = recorder()
+    drawCharacter(plain.ctx, view(), sprites, cache(), 0)
+    const sel = recorder()
+    drawCharacter(sel.ctx, view(), sprites, cache(), 0, { selectedKey: 'k' })
+    const other = recorder()
+    drawCharacter(other.ctx, view(), sprites, cache(), 0, { selectedKey: 'zzz' })
+    expect(sel.ops.length).toBeGreaterThan(plain.ops.length)
+    expect(other.ops.length).toBe(plain.ops.length)
+    expect(fills(sel.ops).some((f) => f.color === PAL.accent)).toBe(true)
+  })
+  test('reduced motion keeps the ! visible at every tick', () => {
+    for (const tick of [0, 400, 800, 1200]) {
+      const r = recorder()
+      drawRing(r.ctx, 'needs-you', 50, 60, tick, true)
+      expect(r.ops.filter((o) => o.op === 'fillText')).toHaveLength(1)
+    }
   })
 })

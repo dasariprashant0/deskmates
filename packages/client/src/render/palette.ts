@@ -36,3 +36,18 @@ export const RING_COLOR: Record<Exclude<Ring, 'idle'>, string> = {
   error: '#D55E00',
   done: '#009E73',
 }
+
+/** HUD text/background pairs; test/render/hud.test.ts asserts WCAG contrast >= 4.5 for each. */
+export const HUD = {
+  bg: '#0d0c1a',
+  text: '#f1ead8',
+  dim: '#a9a3c2',
+  chipBg: '#E69F00',
+  chipText: '#0d0c1a',
+  edge: '#4a4670',
+} as const
+export const HUD_PAIRS: readonly (readonly [string, string])[] = [
+  [HUD.text, HUD.bg],
+  [HUD.dim, HUD.bg],
+  [HUD.chipText, HUD.chipBg],
+]
