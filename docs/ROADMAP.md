@@ -9,7 +9,7 @@ The risk review says v1 should be passive watching plus a "Needs you" notificati
 | Release | Contents | Gate to ship |
 |---|---|---|
 | v0.1 | core, ingest-claude, store, server, web (office, sprites, zones, subagents), cli; Needs-you via heuristic; tokens, cost, time | Parser fixtures green; 50-session benchmark; no network in CI |
-| v0.2 | hooks: consented hooks install/uninstall/doctor and hook-based Needs-you (read-only; whether jump to terminal ships is open, OQ22, recommended no). Browser approve and deny are PARKED: spike S3 showed the first hook to answer wins, so a deskmates allow can override a user's deny hook (decision OQ21, `docs/v0.2/SPEC.md`) | Rebinding harness and Host/Origin/token tests for the nonce exchange, install/uninstall byte-identical, the hook script cannot emit allow or deny |
+| v0.2 | hooks: consented hooks install/uninstall/doctor and hook-based Needs-you (read-only; jump to terminal does not ship in v0.2, OQ22). Browser approve and deny are PARKED: spike S3 showed the first hook to answer wins, so a deskmates allow can override a user's deny hook (decision OQ21, `docs/v0.2/SPEC.md`) | Rebinding harness and Host/Origin/token tests for the nonce exchange, install/uninstall byte-identical, the hook script cannot emit allow or deny |
 | v0.3 | replay: recorder, deterministic player, scrubber | Determinism hash test |
 | v0.4 | export: redacted `.dmrec` and WebM clip | Seeded-secret test finds zero leaks in frames and files |
 | later | other providers, layout editor, terminal mode, desktop wrapper, team mode | Separate threat model |

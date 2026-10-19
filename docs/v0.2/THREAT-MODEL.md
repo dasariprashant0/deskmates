@@ -85,11 +85,11 @@ On 2026-10-19 the owner decided OQ21 = (a): browser approve and deny stay OFF an
 | R5 | no (parked) |  |
 | R6 | no (parked) | replay of a verdict; no verdict exists |
 | R7 | yes |  |
-| J1 | no (parked) | pending OQ22 |
-| J2 | no (parked) | pending OQ22 |
-| J3 | no (parked) | pending OQ22 |
-| J4 | no (parked) | pending OQ22 |
-| J5 | no (parked) | pending OQ22 |
+| J1 | no (parked) | OQ22 = no jump in v0.2 |
+| J2 | no (parked) | OQ22 = no jump in v0.2 |
+| J3 | no (parked) | OQ22 = no jump in v0.2 |
+| J4 | no (parked) | OQ22 = no jump in v0.2 |
+| J5 | no (parked) | OQ22 = no jump in v0.2 |
 
 What a forged ingest request or a socket takeover achieves in slice 1: a fake Needs-you entry and a copy of the payloads. It cannot approve or deny anything, because the slice 1 hook is incapable of printing allow or deny (SPEC R69) and no decide path exists. Rating for slice 1: Low (forged request), Medium (takeover).
 
