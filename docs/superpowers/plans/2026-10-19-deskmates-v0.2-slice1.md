@@ -186,7 +186,7 @@ Tests:
 Interfaces:
 ```ts
 // security.ts
-export function isVerifiedOrigin(headers: IncomingHttpHeaders, port: number): boolean // Origin present and exactly http://127.0.0.1:PORT or http://localhost:PORT, AND Sec-Fetch-Site === 'same-origin'
+export function isVerifiedOrigin(headers: IncomingHttpHeaders, port: number): boolean // Origin present and exactly http://127.0.0.1:PORT or http://localhost:PORT, AND (Sec-Fetch-Site absent OR === 'same-origin'). S9: Chromium sends no Sec-Fetch-* on WebSocket upgrades, WebKit does; absent must verify, a present non-same-origin value must not
 // server -> client, additive; protocol v stays 1, v0.1 clients ignore unknown types
 type RequestMsg = { type: 'request'; requestId: string; sessionKey: string; toolName: string; toolInput: unknown; cwd: string; permissionMode?: string; transcriptSeen: boolean; receivedAt: number; expiresAt: number }
 type RequestStateMsg = { type: 'request.state'; requestId: string; state: 'shown' | 'ended' | 'expired'; reason?: string }
@@ -195,9 +195,9 @@ type ControlStateMsg = { type: 'control.state'; hookSeen: Record<string, 'seen' 
 Behaviour: `request` frames go only to connections that passed the token check AND are `verified`; they are pushed live, never included in `snapshot` or `resync` replies, never in `events` frames; on connect a verified connection receives the currently held requests once (memory-only, 120 s window); `request.state ended` is pushed when the tool ends; the client-to-server surface stays `resync` only (maxPayload 4096, 5/s limit unchanged); every `request` frame goes through `redactWith` like all other frames (home to `~`, secret masks) so the live channel cannot leak secrets.
 
 Tests:
-- **T-raw-scope (R87, R44):** an unverified connection (no Origin, or Origin present but `Sec-Fetch-Site: same-site`) with the right token receives snapshots and events but never a `request` frame; a verified one does; `snapshot` and `resync` replies contain no `toolInput` anywhere (deep scan); the raw string appears in no `events` frame; after the tool ends or after 120 s (fake clock) the store has dropped the entry and a reconnecting verified client does not receive it.
+- **T-raw-scope (R87, R44):** an unverified connection (no Origin, a wrong Origin, or Origin exact but `Sec-Fetch-Site: same-site` or `cross-site`); a connection with exact Origin and no `Sec-Fetch-Site` (the Chromium case) IS verified with the right token receives snapshots and events but never a `request` frame; a verified one does; `snapshot` and `resync` replies contain no `toolInput` anywhere (deep scan); the raw string appears in no `events` frame; after the tool ends or after 120 s (fake clock) the store has dropped the entry and a reconnecting verified client does not receive it.
 - **T-protocol-schema (R34):** enumerate every message type the server can send and accept: assert no `decide`, `grant`, `focus`, `session.optin` type exists on either side and the hook output set (Task 2 constants) is `{nothing}` only.
-- **ws-verified:** table test over Origin and Sec-Fetch-Site combinations against `isVerifiedOrigin`.
+- **ws-verified:** table test over Origin (missing, exact on 127.0.0.1 and localhost, wrong port, `null`, attacker host) and Sec-Fetch-Site (absent, `same-origin`, `same-site`, `cross-site`, `none`) against `isVerifiedOrigin`; absent plus exact Origin is verified, every other row follows the rule above. Driven by `spikes/S9.md`.
 
 - [ ] Steps 1-5, commit `feat(server): verified connections and read-only request pushes`.
 
@@ -380,4 +380,4 @@ Behaviour (SPEC section 12.1): Playwright pinned exactly (no caret), `private: t
 
 **Type consistency:** `HOOK_MARKER`/`deskmates:v1` (Task 2 constants, Task 7 manifest), `StateDir` (Task 3, used by 4 and 9), `HookRequest` and `RequestStore` (Task 4, used by 5), `RequestMsg`/`RequestStateMsg`/`ControlStateMsg` (Task 5, parsed there, rendered by 10), `InstallManifest` (Task 7, read by 8), `AttentionOutcome` and `session.hook` (Task 1, published by 4). `isVerifiedOrigin` (Task 5) and `checkExchangeRequest` (Task 6) are separate functions on purpose: the first gates a read-only push, the second a state-changing route.
 
-**Known gaps and risks to watch:** S5 (rest), S6, S8 and S9 results can change Task 7 (settings forms, live reload, `disableAllHooks`, untrusted project hooks) and Task 12 (WebKit, upgrade header behaviour); run them first. S14's margin on R60 is thin; consider a 350 ms ack deadline if Task 2 measurements are tight. Slice 2 items (decide, grant, pairing, verdict code) are deliberately absent: a reviewer should treat any of them appearing in a diff as a defect.
+**Known gaps and risks to watch:** S5 (rest), S6 and S8 results can change Task 7 (settings forms, live reload, `disableAllHooks`, untrusted project hooks) and Tasks 5 and 10 (S8: mode and agent badges); run them first. S9 is done and already folded into Task 5 (Chromium sends no `Sec-Fetch-Site` on WebSocket upgrades); Task 12 must measure Firefox, which S9 could not launch, and confirm `fetch` to `/api/exchange` carries `Sec-Fetch-Site` in every browser. S14's margin on R60 is thin; consider a 350 ms ack deadline if Task 2 measurements are tight. Slice 2 items (decide, grant, pairing, verdict code) are deliberately absent: a reviewer should treat any of them appearing in a diff as a defect.
