@@ -4,7 +4,7 @@ Status: draft for owner review. Docs only: no code, nothing installed, nothing p
 
 Conventions in this file:
 
-- Requirements are `R1..R54`. Threat ids from the threat model are written `TM:` plus the id, for example `TM:X1`, `TM:R3` (threat model "R3" is not requirement R3).
+- Requirements are `R1..R86`. Threat ids from the threat model are written `TM:` plus the id, for example `TM:X1`, `TM:R3` (threat model "R3" is not requirement R3).
 - `OWNER DECISION` marks anything CLAUDE.md says needs approval first (schema change, new dependency, hook install code, state-changing endpoint policy, publishing). Nothing marked so is decided here; each is an open question in section 14 with a recommendation.
 - `SPIKE Sn` marks something that is not verified from official docs. It must be settled by a spike with a pass criterion (section 11) before the design that depends on it is built.
 
@@ -31,7 +31,7 @@ Conventions in this file:
 | N5 | No approving anything a permission rule denies | Claude Code evaluates deny, then ask, then allow; a hook allow does not override a deny rule (verified, section 3). We rely on it and contract-test it (R36). |
 | N6 | No auto-approve policies, allowlists, timers that decide, or "approve all pending" | A decision is one human act on one request. |
 | N7 | No claim that deskmates is a sandbox or a security boundary | Same-uid processes are out of reach (threat model R-A). Docs and UI say so. |
-| N8 | No approve for tools without a complete renderer (and, in slice 2, only Bash first; see OQ12) | `TM:D4`. |
+| N8 | No approve for any tool other than Bash, Edit, Write and WebFetch (OQ12 b); every other tool is terminal only | `TM:D4`. |
 | N9 | No keystroke injection into terminals | Jump only focuses (`TM:J4`). |
 | N10 | No Windows support in v0.2 unless the owner asks (OQ6) | Unix domain socket ingest, `ps`, AppleScript, tmux are Unix tools. |
 | N11 | No automatic install (no postinstall, no install on first run) | `TM:I9`. |
@@ -102,7 +102,8 @@ Sources: code.claude.com/docs/en/hooks, /permissions, /settings, /sub-agents, /h
 | F1 Install | `deskmates hooks install` in a terminal. It prints the settings file path, a unified diff, what the hook can see and do, the uninstall command. Asks `Install? [y/N]` on a TTY. Writes backup, patches file, copies hook script, records `install.json`, runs doctor | No `--yes`. Non-TTY refuses. `--dry-run` prints the diff only. Running Claude Code sessions may need a restart (S6); the command says what S6 found |
 | F2 Passive start | `deskmates` as today (v0.1 behavior). With a hook installed, the server also opens the ingest listener. Hook seen status per session appears after its first request | Without a hook: heuristic Needs-you, unchanged |
 | F3 Needs-you from hook | Claude Code is about to ask. Hook posts the request. For a session without opt-in, the server replies "no decision" at once (Claude Code's dialog appears without waiting on us, assuming S1 shows the dialog is not blocked; the hook still adds Node start-up and one local round trip, budget p95 under 150 ms (S13), to every permission prompt in every session the hook covers, opted in or not) and the page shows the attention ring and queue entry with only the tool name | Raw input is not sent to connections without a grant (R44) |
-| F4 Pair | User presses `p` in the terminal where deskmates runs. A 6-digit code appears on that terminal (60 s, 3 attempts). User types it into the page's pairing field. Page holds a grant in memory | The page shows "Controls: on until idle 30 min", "N controllers paired" and a "Lock" button; every grant prints a line on the terminal (R71) |
+| F4 Pair (first time this run) | User presses `p` in the terminal where deskmates runs. A 6-digit code appears on that terminal (60 s, 3 attempts). User types it into the page's pairing field. Page holds a grant in memory | The page shows "Controls: on until idle 30 min", "N controllers paired" and a "Lock" button; every grant prints a line on the terminal (R71). The 4 h cap runs from this typed pairing |
+| F4b Re-confirm (page reload or another tab) | The new page has no capability. It shows "Press Enter in the terminal to confirm page K7QX2M". The terminal prints "Page K7QX2M wants to resume controls. Press Enter only if you just loaded or reloaded the deskmates page and it shows this code." User presses Enter once. The page gets a grant | Needs a real TTY on stdin; under tmux or screen, or when S17 marks the terminal injectable, the user retypes the code instead (R80, R81). Each tab needs its own confirm. Nothing is stored in the browser or on disk (R82) |
 | F5 Opt in a session | In the page, on a session card: "Allow browser approvals for this session". A persistent banner on the card and in the panel says "Browser approval ON, session abc123, ~/proj, expires 30 min after last use" | Per session, never global. The terminal-side out-of-band step is pairing (F4); per-session opt-in is made in the page with the grant (OQ20 offers terminal-side opt-in instead). Off at start and after expiry, session end, lock, restart |
 | F6 Request card | A request from an opted-in session with a granted viewer connected opens the card (section 4.2) | |
 | F7 Decide | User waits out the dwell, reads, clicks Approve or Deny with the pointer, or Tabs to the button and activates it (section 4.3) | Result text says "sent to Claude Code", not "applied" (R46) |
@@ -119,10 +120,13 @@ All text comes from the hook payload, rendered with `textContent` only (R40).
 | Element | Rule |
 |---|---|
 | Header | Session title (or short id), `cwd` (home as `~`) labelled "session directory: Bash keeps `cd` between calls, so the command may run elsewhere" (R77), git branch if known, agent (main, or "subagent: unknown" until S8), `permission_mode` from the payload, label "reported by hook" and the corroboration badge (R25) |
-| Primary content, Bash | `command` verbatim in a numbered monospace block. Escaping per R37 (visible escapes for control, bidi, zero-width, tag, ANSI; non-ASCII badge with codepoint view). The `description` field, if any, is a separate labelled box "written by the model, untrusted" |
-| Primary content, other tools | Edit: absolute realpath, old and new text, sensitive-path flag. Write: path, size, content expandable. WebFetch: full URL with userinfo and punycode decoded. Everything else (and every MCP tool): pretty-printed full JSON plus `mcp_server` and tool name, terminal only |
+| Primary content, Bash | `command` verbatim in a numbered monospace block, wrapped. Escaping per R37 and R59. Every other key shown (R84); `description` in a separate box "written by the model, untrusted" |
+| Primary content, Edit | Absolute realpath (with the as-given path when different), sensitive-target flag, full `old_string` and `new_string` side by side or stacked, `replace_all` (R84) |
+| Primary content, Write | Same path rules; full `content` with byte length and line count; head and tail visible, show full, wrapping (R84) |
+| Primary content, WebFetch | Raw URL and parsed scheme, userinfo, host (punycode and Unicode), port, path, query, fragment, each flagged when unusual; the `prompt`; a note that redirects are not shown (R85) |
+| Primary content, every other tool | Pretty-printed full JSON plus `mcp_server` and tool name; terminal only, Approve disabled (R86) |
 | All keys | Every key of `tool_input` is rendered, not only `command`. Per tool there is an allowlist of known keys (Bash: `command`, `description`, `timeout`, `run_in_background`; the real list comes from S15). A key outside the allowlist, or `dangerouslyDisableSandbox: true`, shows a red flag naming the key and disables Approve (R57) |
-| Show full | Head and tail always visible, plus length and line count. Over 2000 characters or 40 lines: Approve stays disabled until expanded and scrolled to the end. Over 16 KiB: no Approve, "answer in the terminal" |
+| Show full | Head and tail always visible, plus length and line count, in every tool's long fields. Over 2000 characters or 40 lines: Approve stays disabled until expanded and scrolled to the end. Over 16 KiB per field or 32 KiB in total: no Approve, "answer in the terminal"; nothing the Approve button covers is ever silently truncated (R86) |
 | Hash | First 8 hex of the SHA-256 of canonical `tool_input` next to Approve |
 | Countdown | Plain text "expires in 17 s" and a thin bar. No colors that escalate, no animation, no sound |
 | Buttons | Deny first and focused. Approve is a different color, disabled until dwell elapses. Plain `<button>` elements |
@@ -243,7 +247,7 @@ sequenceDiagram
   Note over CC,S: Terminal-first (S1): the hook is cancelled or its socket closes. The server sees the close or a transcript tool.end and settles the request ORPHANED or SUPERSEDED. A late decide gets 410
 ```
 
-### 5.6 Pairing
+### 5.6 Pairing and re-confirm
 
 ```mermaid
 sequenceDiagram
@@ -252,10 +256,17 @@ sequenceDiagram
   participant P as page
   T->>S: key p
   S->>T: 6-digit code written to /dev/tty only (60 s, 3 attempts)
-  P->>S: WS grant(code)  (upgrade had exact Origin and same-origin)
-  S->>S: constant-time compare, bind grant to this WS connection id
-  S-->>P: grant (256-bit), idle 30 min, absolute cap
+  P->>S: WS grant(code, pageSessionId)  (upgrade had exact Origin and same-origin)
+  S->>S: constant-time compare, bind grant to this WS connection and page session
+  S-->>P: grant (256-bit), idle 30 min, 4 h cap from this typed pairing
   Note over P: grant lives in a closure, never storage, DOM, URL or logs
+  Note over P,S: later, page reload or a new tab: no capability yet
+  P->>S: WS grant.reconfirm(pageSessionId)
+  S->>S: challenge bound to this page session, single use, 30 s, fingerprint K7QX2M
+  S-->>P: reconfirm.pending(fingerprint K7QX2M, expires)
+  S->>T: flush stdin, print fingerprint prompt
+  T->>S: one Enter keypress on a real TTY (a lone CR, after 400 ms)
+  S-->>P: grant (same 4 h cap), challenge consumed
 ```
 
 ### 5.7 Hook timing
@@ -289,7 +300,8 @@ WebSocket client to server (new types are additive; v0.1 servers ignore unknown 
 | Message | Fields | Auth | Effect |
 |---|---|---|---|
 | `resync` | none | read token (existing) | Unchanged |
-| `grant` | `code` | `verified` connection + 6-digit code | Returns `grant`; bound to this connection |
+| `grant` | `code`, `pageSessionId` | `verified` connection + 6-digit code (first pairing of the run only) | Returns `grant`; bound to this connection and page session |
+| `grant.reconfirm` | `pageSessionId` | `verified` connection; a typed pairing already happened this run; rate limited | Creates a terminal re-confirm challenge (R79); no capability until Enter |
 | `revoke` | none | grant | Drops the grant and this connection's opt-ins |
 | `session.optin` | `sessionKey`, `on` | grant | Per-session opt-in on or off; 30 min idle expiry |
 | `decide` | `requestId`, `inputHash`, `verdict` (allow or deny), `grant`, `n` (monotonic counter) | `verified` connection + grant + opted-in session. Read token alone: refused | Section 8 |
@@ -300,6 +312,7 @@ WebSocket server to client (new, additive):
 | Message | To | Content |
 |---|---|---|
 | `grant.ok` / `grant.fail` | requester | Grant and expiry, or a reason code only |
+| `reconfirm.pending` | requester | Short fingerprint, expiry; the same fingerprint is printed in the terminal |
 | `request` | granted connections only | `requestId`, `sessionKey`, display fields, the raw `tool_input` object, `inputHash`, `shownAt`, `deadline`, `transcriptSeen` (badge only), tool renderability flag |
 | `request.state` | granted connections | `requestId`, state, reason code |
 | `decide.result` | requester | `accepted`, `conflict` (409), `gone` (410), `refused` (403) or `bad` (400), reason code |
@@ -480,8 +493,8 @@ Each MUST is testable. Test column names the test in section 12.
 | R24 | A verdict is written only to the connection that created that request | TM:R4, TM:H2 | T-cross-delivery |
 | R25 | Requests are labelled "reported by hook" and carry a badge "seen in transcript" or "not seen in transcript" from an open transcript `tool_use` with the same session, tool and canonical hash, read only per R62. The badge is informational and never gates Approve or Deny | TM:H2, TM:D8 | T-corroboration, T-forger |
 | R26 | No browser-decide capability (pairing code, grant) exists on disk, in env, in argv, or in any URL, at any time. The ingest secret is on disk by necessity and is covered by R19, R20 and the same-uid ceiling | TM:X3 | T-secret-scan |
-| R27 | Pairing: code printed to `/dev/tty` only (refuse to pair if no TTY), 6 digits from a CSPRNG, valid 60 s, single use (a successful grant invalidates it, so a second tab cannot reuse it), 3 failed attempts per connection counted first and 12 across all connections as a hard cap, constant-time compare; when failures burned the code the terminal says so and a new code must be requested (R58) | TM:X7, TM:X10 | T-pairing |
-| R28 | Grant: 256-bit, bound to one WS connection, memory only, idle expiry 30 min, absolute cap 4 h, revocable from page and terminal, void on close or server restart | TM:X9 | T-grant |
+| R27 | First pairing in a run: code printed to `/dev/tty` only (refuse to pair if no TTY), 6 digits from a CSPRNG, valid 60 s, single use (a successful grant invalidates it, so a second tab cannot reuse it), 3 failed attempts per connection counted first and 12 across all connections as a hard cap, constant-time compare; when failures burned the code the terminal says so and a new code must be requested (R58). Later page loads use the re-confirm of R79-R83 instead of a new typed code | TM:X7, TM:X10 | T-pairing |
+| R28 | Grant: 256-bit, bound to one WS connection and one page session id, memory only, idle expiry 30 min, absolute cap 4 h counted from the typed pairing (a re-confirm does not extend it), revocable from page and terminal, void on close, reload or server restart | TM:X9 | T-grant |
 | R29 | `decide` and `focus` require exact Host, present exact Origin, `Sec-Fetch-Site: same-origin` on the upgrade, a `verified` connection and a valid grant. The read token with perfect headers is refused | TM:X1, TM:X3, TM:X7 | T-decide-auth, T-rebind |
 | R30 | Control is off at start; opt-in is per session, grant-gated, shown by a persistent banner, expires after 30 min idle, on session end, lock and restart | TM:X8 | T-optin |
 | R31 | A decision binds `requestId`, `inputHash`, verdict and a strictly increasing counter; any mismatch is refused without consuming the request | TM:X2, TM:X9 | T-bind |
@@ -491,8 +504,8 @@ Each MUST is testable. Test column names the test in section 12.
 | R35 | Deny sends a fixed neutral message and no `interrupt` | TM:R5 | T-hook-golden |
 | R36 | A call denied by a permission rule stays denied when the browser allows; a call the user's `ask` rule would ask about is allowed only by an explicit allow | TM:I7 | T-contract-precedence (S11) |
 | R37 | The card renders raw payload fields as primary text, escapes visibly per R59 (at least every control, bidi, zero-width, tag, variation-selector and ANSI character), shows a non-ASCII badge with codepoints, numbers lines, and labels `description` as untrusted | TM:D1, TM:D2 | T-render-corpus |
-| R38 | Head and tail always shown with length and line count; over 2000 characters or 40 lines Approve needs expand and scroll to end; over 16 KiB no Approve | TM:D3 | T-render-length |
-| R39 | Approve exists only for tools with a complete renderer; others and all MCP tools are terminal only; Edit and Write show realpath and flag sensitive targets; WebFetch shows full URL | TM:D4 | T-render-tools |
+| R38 | Head and tail always shown with length and line count; over 2000 characters or 40 lines Approve needs expand and scroll to end; the 16 KiB and 32 KiB caps of R86 apply | TM:D3 | T-render-length |
+| R39 | Approve exists only for Bash, Edit, Write and WebFetch, each with its complete renderer (R84, R85); everything else is terminal only (R86) | TM:D4 | T-render-tools |
 | R40 | No HTML sinks (lint fails CI), no inline script or style, strict CSP plus `require-trusted-types-for 'script'`, `frame-ancestors 'none'` and `X-Frame-Options: DENY` on every page; text via `textContent` | TM:D5, TM:D6 | T-xss, T-csp, T-iframe |
 | R41 | No autofocus on Approve; only trusted click events count; keyboard activation per section 4.3; no global shortcut | TM:D6 | T-dwell, T-a11y |
 | R42 | OS notifications say only that a session needs you; "hide details" blurs and disables Approve | TM:D7 | T-notify |
@@ -510,8 +523,8 @@ Each MUST is testable. Test column names the test in section 12.
 | R54 | A real-browser rebinding harness (section 12.1) runs on every PR for Chromium and Firefox with a positive control and a mutation check before slice 2 merges | TM:X1, TM:H1, TM:D6 | T-rebind |
 | R55 | The server holds the ingest socket inode it created, calls `lstat` on it every 1 s and before writing each verdict; if the inode or owner changed or the socket vanished, it disables control, drops pending requests and prints an alarm on `/dev/tty`. This detects takeover; it cannot prevent a replacement listener from answering hooks (RR6) | TM:H8 | T-socket-takeover |
 | R56 | The launch URL and the pairing code are written only to `/dev/tty`, never to stdout, stderr or logs. Control (pairing) is refused when `TMUX` or `STY` is set or stdout is not a TTY, unless the owner passes an explicit flag (OQ19). This is a change from v0.1, which prints the URL on stdout | TM:X11 | T-tty-only |
-| R57 | The card renders every key of `tool_input`. Any key outside the per-tool allowlist, or `dangerouslyDisableSandbox` true, shows a red flag and disables Approve; the allowlist comes from spike S15 | TM:D11 | T-unknown-keys |
-| R58 | Pairing code lifecycle per R27: single use, per-connection attempt budget first, global cap, burned-code notice on the terminal | TM:X12 | T-pairing |
+| R57 | The card renders every key of `tool_input` for every tool (allowlists: Bash `command`, `description`, `timeout`, `run_in_background`; Edit `file_path`, `old_string`, `new_string`, `replace_all`; Write `file_path`, `content`; WebFetch `url`, `prompt`; all confirmed by S15). Any key outside the per-tool allowlist, or `dangerouslyDisableSandbox` true, shows a red flag and disables Approve; the allowlist comes from spike S15 | TM:D11 | T-unknown-keys |
+| R58 | First-pairing code lifecycle per R27: single use, per-connection attempt budget first, global cap, burned-code notice on the terminal | TM:X12 | T-pairing |
 | R59 | The renderer escapes every code point outside printable ASCII (including NBSP, U+3000, U+2028/2029, U+2800, U+3164, all other Zs, Zl, Zp, Cf, and combining marks) unless it sits in an allowlisted script run the user can see labelled; lines wrap, there is no horizontal scroll or clipping that hides text | TM:D2 | T-render-corpus |
 | R60 | The server acks every request with `held` or `none` within 500 ms of connect; the hook exits 0 empty if no ack line arrives in 500 ms, independent of the connect timeout | TM:R7 | T-sigstop |
 | R61 | The verdict MAC also covers a fresh per-request nonce chosen by the hook, so a captured allow cannot be replayed to another request | TM:R6 | T-mac-replay |
@@ -532,6 +545,14 @@ Each MUST is testable. Test column names the test in section 12.
 | R76 | Upgrades: re-running `hooks install` after a release shows a diff of the script only (the settings entry and marker `deskmates:v1` are unchanged), asks consent, replaces the script atomically, updates `install.json`; the server accepts a shipped list of known script hashes for no-opinion operation and requires the current hash for control | TM:H14, TM:I2 | T-upgrade |
 | R77 | The card labels `cwd` as the session directory and says the command may run elsewhere because Bash keeps `cd` between calls | TM:D12 | T-render-cwd |
 | R78 | Peer credentials: where the OS offers a peer uid check reachable without a native dependency, the server verifies it on every ingest connection; otherwise it relies on the 0700 directory and says so in `doctor` (Node has no built-in `SO_PEERCRED` or `LOCAL_PEERCRED` access, so this is a known gap) | TM:H8, TM:H10 | T-peer-cred (best effort) |
+| R79 | A page load, reload or new tab yields no capability until a re-confirm challenge is satisfied. The challenge is bound to one page session id (128-bit, generated per page load) and one connection, is single use, expires after 30 s, and is rate limited (1 new challenge per 5 s per connection, 3 outstanding globally, lockout after 5 failed or expired per minute until a typed code is used). An expired or consumed challenge can never be confirmed late; Enter with no pending challenge is ignored and not buffered | TM:X16, TM:X17 | T-reconfirm |
+| R80 | The terminal prompt prints a short fingerprint ("press Enter to confirm page K7QX2M"); the page shows the same fingerprint, so a wrong page or tab cannot be confirmed by mistake. The server flushes pending stdin before waiting, ignores input for the first 400 ms after printing, and accepts only a read that is exactly one Enter (so buffered, pasted or multi-byte input cannot confirm). It needs a real TTY on stdin and stdout; under tmux or screen, or without a TTY, re-confirm is not offered and the typed code is required (R56, OQ19). Several tabs each need their own confirm and their own fingerprint; the terminal shows one pending challenge at a time | TM:X15, TM:X16, TM:X17 | T-reconfirm, T-reconfirm-fingerprint, T-reconfirm-tty |
+| R81 | If spike S17 shows a same-uid process can inject the Enter keypress without a user-visible OS permission prompt on a terminal, the server treats that terminal as injectable and falls back to requiring the typed code on every reload; `doctor` reports which; the owner is told. Terminal identity is advisory (`TERM_PROGRAM`), and an unknown terminal is treated as injectable | TM:X15 | T-reconfirm-inject |
+| R82 | Nothing about a grant or a resume is persisted: no cookie, `localStorage`, `sessionStorage`, IndexedDB, URL, file or server-side resume token; a reload or server restart loses the grant. Idle expiry (30 min) and the 4 h cap from the typed pairing (R28) remain | TM:X9, TM:X7 | T-grant-nopersist |
+| R83 | The terminal prompt and the page both show the connection's Origin and age next to the fingerprint, and every confirm prints a line on `/dev/tty` (R71); a challenge the user did not start (the page was not reloaded) is called out in the prompt text | TM:X16 | T-reconfirm-fingerprint |
+| R84 | Bash shows the raw `command` and every other key (`description` labelled model-written, `timeout`, `run_in_background`, and any unknown key flagged); Edit shows `file_path` as an absolute realpath (relative paths shown as given and as resolved against the session directory; a missing file resolves its parent; symlinks resolved) with the sensitive-target flag (settings, hooks, `~/.deskmates`, shell rc, `.ssh`, `.git/hooks`, CI files, `.env`) and the full `old_string` and `new_string` plus `replace_all`; Write shows the same path rules, the full `content`, its UTF-8 byte length and line count, with show full and wrapping so a long benign prefix cannot hide a dangerous tail | TM:D1, TM:D4, TM:D14 | T-render-bash, T-render-edit, T-render-write |
+| R85 | WebFetch shows the raw `url` string and its parsed parts: scheme (flag non-https), userinfo (flag), host with punycode and its Unicode form side by side (flag mixed scripts, confusables, IP literals, localhost and private ranges), port (flag non-default), path, query (flag) and fragment (flag), plus the `prompt` verbatim, and states that the fetch may follow redirects to a destination that is not shown | TM:D4, TM:D13 | T-render-webfetch |
+| R86 | Caps: each rendered field over 2000 characters or 40 lines needs expand and scroll to end; any single field over 16 KiB, or the whole `tool_input` over 32 KiB, disables Approve and the card says "answer in the terminal"; the approved part is never silently truncated. Every other tool (MCP tools, NotebookEdit, Agent and the rest) is terminal-only with Approve disabled | TM:D3, TM:D4 | T-render-limits, T-render-tools |
 
 Threat coverage check: every one of the threat ids (I1-I13, H1-H14, D1-D12, X1-X14, TM:R1-R7, J1-J5; 46 original plus 22 added after the two reviews) appears in the Threats column at least once. A script check is part of slice 0 task 6.
 
@@ -573,11 +594,13 @@ A corpus of at least 20 settings fixtures: empty file, `{}`, no `hooks` key, `ho
 
 | Suite | Content |
 |---|---|
-| Render corpus | 40+ strings: trojan-source bidi samples, Cyrillic lookalikes, `\e[2K`, `\r` overwrite, tag characters, 5 KB benign prefix then `curl ... \| sh`, empty and huge values, per-tool tables, sensitive-path flags, unknown tool terminal-only |
+| Render corpus (shared) | 40+ strings: trojan-source bidi samples, Cyrillic lookalikes, `\e[2K`, `\r` overwrite, tag characters, 5 KB benign prefix then `curl ... \| sh`, empty and huge values, per-tool tables, sensitive-path flags, unknown tool terminal-only |
 | XSS and CSP | Payloads (`<img onerror>`, `javascript:`, SVG, template literals) via the request card; Playwright asserts no script execution and no DOM node created from text; CSP and Trusted Types header snapshot; lint rule banning HTML sinks |
 | Secrets | Seed fixtures with fake AWS, GitHub, Anthropic keys, a JWT and `.env` text in `tool_input`; run the full flow; grep logs, audit, cache, status, snapshots, events and the run directory; assert absent. Scan `ps` and environment during a hook call for the ingest secret and the grant |
 | Capabilities | Matrix of read token, ingest secret, grant, nonce against every route and WS message; each credential works only where R19 says |
-| Pairing and grant | Code is single use (second tab fails); another client burning attempts does not lock out the user's own connection budget until the global cap; burned-code notice shown; 3 attempts then lockout; expiry; revoke from terminal; reload requires pairing |
+| Re-confirm | T-reconfirm: challenge bound to a page session, single use, 30 s expiry, rate limit and lockout, late Enter ignored, Enter with no challenge ignored; T-reconfirm-fingerprint: the same fingerprint in terminal and page, a second tab gets its own, confirming a different tab's challenge is impossible; T-reconfirm-tty: stdin flush, 400 ms quiet period, multi-byte or pasted input refused, no TTY or multiplexer means typed code; T-reconfirm-inject: S17 injection attempts per terminal select the fallback; T-grant-nopersist: after reload no storage key, cookie, file or server token exists |
+| Per-tool display corpora | T-render-bash, T-render-edit, T-render-write, T-render-webfetch, T-render-limits (all four tools' corpora must pass before slice 2 ships). Bash: every-key and unsandboxed flag cases, 5 KB benign prefix then a dangerous tail. Edit: relative and symlinked paths, sensitive targets, huge old and new strings, whitespace-only diffs. Write: long benign prefix then a dangerous tail, byte length with multibyte text, sensitive targets, empty content. WebFetch: userinfo tricks (`https://good.com@evil.com`), IDN homographs, mixed scripts, IP and private ranges, odd ports, fragments, backslashes, percent-encoding, non-https schemes, very long query. Limits: field at 2000 and 16 KiB, total at 32 KiB, Approve disabled with the terminal-only note, no silent truncation |
+| Pairing and grant | Code is single use (second tab fails); another client burning attempts does not lock out the user's own connection budget until the global cap; burned-code notice shown; 3 attempts then lockout; expiry; revoke from terminal; reload needs a terminal re-confirm, not a new code |
 | Contract (opt-in, release) | Against the installed Claude Code, scratch project, `--settings` file so the user's settings are untouched: S2, S3, S11 re-run as automated checks; refuse control on versions outside the tested range |
 | Accessibility | Keyboard-only flow of the card, focus order, reduced motion, screen reader announcements for state changes, contrast; Accessibility Auditor review |
 | Socket takeover | T-socket-takeover: with control on, unlink and rebind `ingest.sock` from another process that holds `ingest.json`; assert the alarm within 1 s, control off, pending dropped; also assert the documented residual that the impostor can still answer a hook. T-socket-hygiene: symlinked `run/`, loose `~/.deskmates` mode, live second server not stolen, `ingest.json` exists already |
@@ -666,11 +689,11 @@ Each slice ends in a gate; nothing in the next slice starts until the gate passe
 
 ### Slice 0: spikes (no product code)
 
-Spikes S1-S16 (section 15) run by hand in a scratch directory with a stub hook script that logs timestamps to a scratch file. Output: `docs/v0.2/SPIKES.md` table of observed behavior, Claude Code version, date.
+Spikes S1-S17 (section 15) run by hand in a scratch directory with a stub hook script that logs timestamps to a scratch file. Output: `docs/v0.2/SPIKES.md` table of observed behavior, Claude Code version, date.
 
-Tasks: (1) owner approves running spikes and the Claude Code version; (2) write stub hook and scratch project; (3) run S1-S3, S5, S6, S11 first; (4) run S4, S7-S10, S12-S15; (5) update the assumption statuses in the threat model and the numbers in this spec; (6) script the threat-coverage check from section 11.
+Tasks: (1) owner approves running spikes and the Claude Code version; (2) write stub hook and scratch project; (3) run S1-S3, S5, S6, S11 first; (4) run S4, S7-S10, S12-S17; (5) update the assumption statuses in the threat model and the numbers in this spec; (6) script the threat-coverage check from section 11.
 
-Gate: S1, S2, S3, S5, S6 and S11 results reviewed by the owner. If S1 shows the terminal dialog is blocked while a hook waits, wait values drop to 10 s or less and control (slice 2) needs a fresh owner decision. If S2 shows any implicit allow or deny after a crash, v0.2 stops at slice 1 pending redesign. Reviewers: `claude-code-guide` for doc cross-check, `agentic-council:Skeptic` on the SPIKES results.
+Gate: S1, S2, S3, S5, S6, S11 and S17 results reviewed by the owner. If S1 shows the terminal dialog is blocked while a hook waits, wait values drop to 10 s or less and control (slice 2) needs a fresh owner decision. If S2 shows any implicit allow or deny after a crash, v0.2 stops at slice 1 pending redesign. Reviewers: `claude-code-guide` for doc cross-check, `agentic-council:Skeptic` on the SPIKES results.
 
 ### Slice 1: install, uninstall, hook-based Needs-you, no decide
 
@@ -682,11 +705,11 @@ Gate (control does not exist yet, so R4, the control refusal in R16, R25, R27-R4
 
 ### Slice 2: decide behind pairing
 
-Delivers: pairing, grant, per-session opt-in, request card, `decide`, state machine, dwell, transcript badge, renderer for Bash first (Edit, Write, WebFetch added after the render corpus passes; OQ12), SECURITY.md update.
+Delivers: pairing, grant, per-session opt-in, request card, `decide`, state machine, dwell, transcript badge, renderers for all four approvable tools (Bash, Edit, Write, WebFetch; OQ12 b), re-confirm after reload, SECURITY.md update.
 
-Tasks, test first: ADRs A6-A9; state machine with property test; grant and pairing; renderer and corpus; page card with a11y; decide path; contract tests S11; race suite; rebinding harness extended to `grant` and `decide`; live attack script re-run under Node.
+Tasks, test first: ADRs A6-A9; state machine with property test; grant, pairing and re-confirm; the four renderers and their corpora (R84-R86);  page card with a11y; decide path; contract tests S11; race suite; rebinding harness extended to `grant` and `decide`; live attack script re-run under Node.
 
-Gate: the "Do not ship v0.2" list in the threat model section 4, with R1, R6, R24-R46, R54, R57-R59 and R62 green; owner signs the residual-risk ADR (section 14, OQ16). Reviewers: `ecc:security-reviewer`, `cto-toolkit:security-auditor`, `AI-Generated Code Security Auditor`, `agentic-council:Skeptic`, `Accessibility Auditor`, `Reality Checker`, `ecc:code-reviewer`.
+Gate: the "Do not ship v0.2" list in the threat model section 4, with R1, R6, R24-R46, R54, R57-R59, R62 and R79-R86 green, and with the per-tool display-safety corpora (T-render-bash, T-render-edit, T-render-write, T-render-webfetch, T-render-limits) passing for all four tools before the slice ships and the S17 outcome applied; owner signs the residual-risk ADR (section 14, OQ16). Reviewers: `ecc:security-reviewer`, `cto-toolkit:security-auditor`, `AI-Generated Code Security Auditor`, `agentic-council:Skeptic`, `Accessibility Auditor`, `Reality Checker`, `ecc:code-reviewer`.
 
 ### Slice 3: jump to terminal
 
@@ -700,9 +723,7 @@ SECURITY.md and README updated, live attack run repeated under Node, `pnpm insta
 
 ## 14. Open questions for the owner
 
-**Decided by the owner on 2026-10-19** (each as recommended below): OQ1 = (A) server-side correlation, no core change; OQ4 = (a) approve the nonce-authenticated `/api/exchange`; OQ4b = (a) approve the additive WS messages; OQ4c = (a) amend the SECURITY.md non-negotiable (browser-reachable endpoints; the Unix-socket ingest authenticates by location, mode, ingest secret and MAC); OQ7 = (c) ask every time, suggest project-local, user-global only after an explicit "all projects" confirmation (R14); OQ16 = (a) accept the residual risks and record them in an ADR (still to be written, see section 16); OQ17 = Playwright as a dev-only dependency, contained as R65 describes, no property-test library; OQ19 = (a) refuse pairing under tmux, screen or a non-TTY unless `--allow-multiplexer`; OQ20 = (a) per-session opt-in in the page. Not yet written: the SECURITY.md amendment and the ADR for OQ16, both part of slice 0. All other questions below are still recommendations, not decisions.
-
-Nothing else here is decided. Each recommendation is mine.
+**Decided by the owner on 2026-10-19** (each as recommended below): OQ1 = (A) server-side correlation, no core change; OQ4 = (a) approve the nonce-authenticated `/api/exchange`; OQ4b = (a) approve the additive WS messages; OQ4c = (a) amend the SECURITY.md non-negotiable (browser-reachable endpoints; the Unix-socket ingest authenticates by location, mode, ingest secret and MAC); OQ7 = (c) ask every time, suggest project-local, user-global only after an explicit "all projects" confirmation (R14); OQ16 = (a) accept the residual risks and record them in an ADR (still to be written, see section 16); OQ17 = Playwright as a dev-only dependency, contained as R65 describes, no property-test library; OQ19 = (a) refuse pairing under tmux, screen or a non-TTY unless `--allow-multiplexer`; OQ20 = (a) per-session opt-in in the page. Also decided the same day: OQ2 = (a) optional `outcome` on `attention.resolved` (schema change approved); OQ3 = (a) new `session.hook` event (schema change approved); OQ5 = (a) Unix socket in a 0700 dir; OQ6 = (a) no Windows in v0.2 (macOS and Linux only; the owner briefly chose Windows and reverted once the consequences were shown); OQ8 = (a) waits 25 s server, 28 s hook, 30 s timeout, revisited after S1; OQ10 = (b) corroboration is a badge only; OQ11 = (a) Tab-reached buttons, no shortcuts; OQ13 = (a) dwell 1500 ms first display and 600 ms re-arm; OQ14 = (a) Deny needs the same per-session opt-in as Approve; OQ15 = (a) OS notifications off by default, generic text; OQ18 = (a) spikes may run with real `claude` sessions in a scratch dir via `--settings` only (the owner is asked before each run). Two decisions changed the design and are now reflected in the requirements: **OQ9** is NOT (a): first pairing stays the typed code; on a page reload the grant is re-confirmed by one Enter keypress in the terminal where deskmates runs, and nothing is persisted in browser storage or on disk (R79-R83, threats X15-X17, spike S17; if S17 shows the keypress can be injected silently, the design falls back to retyping the code on every reload); **OQ12** is (b): Bash, Edit, Write and WebFetch get browser approve together in slice 2, so slice 2's gate is that the display-safety corpus passes for all four tools (R84-R86). Still not written: the SECURITY.md amendment and the ADR for OQ16, both slice 0 or spec follow-ups. Every question in the table is now decided.
 
 | # | Question | Options | Recommendation |
 |---|---|---|---|
@@ -715,10 +736,10 @@ Nothing else here is decided. Each recommendation is mine.
 | OQ6 | Windows in v0.2 | (a) no; (b) yes, named pipe and different focus tooling | (a) |
 | OQ7 | Default settings scope and how far the same-uid ceiling reaches | (a) user-global, which widens the blast radius to every project and every session (every permission request goes to the hook, a takeover or bug affects all); (b) project-local `settings.local.json`; (c) ask every time, no default | (c) with a suggestion of project-local; user-global only by an explicit "all projects" confirmation (R14) |
 | OQ8 | Wait values 25 s server, 28 s hook, 30 s timeout; range 10-90 s | (a) as proposed; (b) shorter (15 s); (c) longer (60 s) | (a), revisited after S1. A long wait is only paid by opted-in sessions |
-| OQ9 | Grant lifetime and reload | (a) re-pair on every page load, 30 min idle, 4 h cap; (b) per run, survives reload via storage (readable by same-uid processes from disk, so weaker) | (a) |
+| OQ9 | Grant lifetime and reload | DECIDED, not (a): first pairing is the typed code; a reload is re-confirmed by one Enter in the terminal (R79-R83); nothing persisted; 30 min idle and 4 h cap remain; fallback to retyping the code if S17 shows keypress injection | decided |
 | OQ10 | Corroboration policy | (a) Approve requires a transcript match; (b) badge only | (b), adopted from the second review: the gate protected a harmless case (a forged approval only answers the forger) and depended on S7 and watcher latency. Owner may overrule |
 | OQ11 | Keyboard rule versus `TM:D6` | (a) Tab-reached button, Enter or Space works after dwell, no shortcuts; (b) pointer only (fails WCAG 2.1.1) | (a) |
-| OQ12 | Tools with browser approve in slice 2 | (a) Bash only, then Edit, Write, WebFetch once the render corpus passes; (b) all four at once | (a): smallest renderer surface first |
+| OQ12 | Tools with browser approve in slice 2 | DECIDED (b): Bash, Edit, Write and WebFetch together; slice 2 gate is the display-safety corpus passing for all four (R84-R86); every other tool terminal-only | decided |
 | OQ13 | Dwell | (a) 1500 ms first display, 600 ms re-arm; (b) other | (a) |
 | OQ14 | Deny without per-session opt-in | (a) no, same opt-in; (b) allow deny always | (a) for one simple rule |
 | OQ15 | OS notifications | (a) off by default, generic text; (b) on by default | (a) |
@@ -765,6 +786,7 @@ Every spike has a falsifiable pass criterion and states what changes in the desi
 | S15 | What is the full key set of `tool_input` for Bash, Edit, Write, WebFetch (for example `dangerouslyDisableSandbox`, `run_in_background`, `timeout`)? | Observed key lists recorded per tool over 50 synthetic calls plus the docs; becomes the allowlist for R57 | R57 |
 | S13 | Hook cold-start cost: wall time of the hook returning `none` | p95 under 150 ms including Node start over 100 runs. Fail: reduce the script, consider a faster runtime | R4 |
 | S16 | On the supported Node versions, does `kill -USR1 <server pid>` open the inspector on 127.0.0.1:9229, and does `--disable-sigusr1` or a SIGUSR1 handler stop it? | Pass: with the chosen setting the inspector stays closed in 10 of 10 signals on each supported Node version. Fail: the server refuses control on that Node version | R70 |
+| S17 | Can a same-uid, unprivileged process deliver the confirming Enter to the deskmates terminal on macOS Terminal.app, iTerm2 and one Linux terminal: (a) `TIOCSTI` ioctl on the tty, (b) AppleScript `System Events` keystroke, (c) iTerm2 `write text` or Terminal.app `do script`, (d) writes to the pty, (e) `tmux send-keys` (already refused by R56)? Test with and without a prior Automation or Accessibility grant to the parent app (a grant made earlier, for example for slice 3 jump, counts as no prompt) | Pass: no method makes deskmates read a lone Enter as the confirmation without a user-visible OS permission prompt, in 10 of 10 attempts per terminal. Fail (any method works silently): that terminal is injectable, the re-confirm collapses to no protection there, and R81 applies: the design falls back to retyping the code on every reload for that terminal and the owner is told | R80, R81, TM:X15 |
 
 ## 16. ADRs to write
 
