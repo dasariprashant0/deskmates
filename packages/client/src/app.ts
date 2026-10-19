@@ -3,6 +3,7 @@ import { generateSprite, type Frame, type SpriteSheet } from '@deskmates/sprites
 import { createDemo, createConnection, createMirror, demoSnapshot, isDemo, readToken, stripFragment, type Mirror, type Status } from './index'
 import { asPriceTable, DEFAULT_META, formatTokens, pricesNote, type PricesMeta } from './hud/cost'
 import { createAnnouncer } from './hud/announce'
+import { createLabeler } from './hud/labels'
 import { cycleKey, describeTotals, shortDir, summarize, type AgentRow, type Summary } from './hud/summary'
 import { createBitmapCache, drawCharacters, drawFloor, drawFurniture, type Ctx2D } from './render/draw'
 import { fitScale } from './render/fit'
@@ -63,8 +64,9 @@ if (isDemoMode) {
 // ---- sim and rendering ------------------------------------------------------------------------
 const motion = matchMedia('(prefers-reduced-motion: reduce)')
 let showAll = false
+const labeler = createLabeler()
 const newSim = (): Sim => {
-  const s = createSim({ layout: defaultLayout, reducedMotion: motion.matches })
+  const s = createSim({ layout: defaultLayout, reducedMotion: motion.matches, labeler })
   s.setShowAll(showAll)
   return s
 }
@@ -73,11 +75,11 @@ motion.addEventListener('change', () => { sim = newSim() })
 
 const sheets = new Map<string, SpriteSheet>()
 const sprites = {
-  get(name: string): SpriteSheet {
-    let s = sheets.get(name)
+  get(look: string): SpriteSheet {
+    let s = sheets.get(look)
     if (!s) {
-      s = generateSprite(name)
-      sheets.set(name, s)
+      s = generateSprite(look)
+      sheets.set(look, s)
     }
     return s
   },
@@ -262,7 +264,7 @@ const draw = (): void => {
     lastRefresh = now
     const raw = mirror.prices()
     if (raw !== rawPrices) { rawPrices = raw; priceTable = asPriceTable(raw) }
-    summary = { ...summarize(mirror.state(), priceTable, pricesMeta(), now), hidden: sim.hiddenCount() }
+    summary = { ...summarize(mirror.state(), priceTable, pricesMeta(), now, labeler), hidden: sim.hiddenCount() }
     updateMirror(summary)
     const totals = describeTotals(summary.totals, summary.hidden)
     if (totals !== lastTotals) { lastTotals = totals; summaryEl.textContent = totals }

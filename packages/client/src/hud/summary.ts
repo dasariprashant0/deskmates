@@ -70,9 +70,9 @@ const row = (a: AgentState, prices: PriceTable, now: number, label: AgentLabel |
   }
 }
 
-export function summarize(state: OfficeState, prices: PriceTable, meta: PricesMeta, now: number): Summary {
+export function summarize(state: OfficeState, prices: PriceTable, meta: PricesMeta, now: number, label: (s: OfficeState) => Map<string, AgentLabel> = labelAgents): Summary {
   const agents: AgentRow[] = []
-  const labels = labelAgents(state)
+  const labels = label(state)
   const seen = new Set<string>()
   for (const k of state.order) {
     const a = state.agents[k]

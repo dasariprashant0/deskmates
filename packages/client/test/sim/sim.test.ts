@@ -660,3 +660,16 @@ describe('determinism and performance', () => {
     expect(dt).toBeLessThan(200)
   })
 })
+
+describe('sibling looks', () => {
+  test('same-type subagents get distinct looks and the first keeps the plain name', () => {
+    const w = world()
+    const p = mk('s')
+    const sub = (id: string, t: number): AgentState => ({ ...mk('s'), key: `t:s:${id}`, ref: { provider: 't', sessionId: 's', agentId: id }, agentType: 'general-purpose', parentKey: p.key, startedAt: t })
+    w.set(p, sub('a', 1), sub('b', 2))
+    w.run(3000)
+    const by = Object.fromEntries(w.sim.characters().map((c) => [c.key, c]))
+    expect(by['t:s:a']?.look).toBe('general-purpose')
+    expect(by['t:s:b']?.look).toBe('general-purpose #2')
+  })
+})
