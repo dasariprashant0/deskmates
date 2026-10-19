@@ -6,7 +6,7 @@ import { createSim } from '../../src/sim/sim'
 const NOW = 10_000_000
 const mk = (i: number, status: AgentState['status'], ageMs: number, o: Partial<AgentState> = {}): AgentState => ({
   key: `t:s${i}:main`, ref: { provider: 't', sessionId: `s${i}` }, cwd: `/w/p${i}`, status, activity: 'thinking',
-  openTools: {}, openOrder: [], usage: { input: 0, cacheWrite: 0, cacheRead: 0, output: 0 },
+  openTools: {}, openOrder: [], recent: [], usage: { input: 0, cacheWrite: 0, cacheRead: 0, output: 0 },
   startedAt: NOW - ageMs - 1000, lastEventAt: NOW - ageMs, children: [], ...o,
 })
 const office = (a: AgentState[]): OfficeState => ({ agents: Object.fromEntries(a.map((x) => [x.key, x])), order: a.map((x) => x.key), seq: 0 })

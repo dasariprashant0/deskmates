@@ -12,12 +12,36 @@ canvas#office:focus-visible { outline: 3px solid var(--accent); outline-offset: 
 #badge { right: 8px; border: 1px solid var(--accent); }
 #card { position: fixed; top: 44px; right: 8px; bottom: auto; width: min(340px, calc(100vw - 16px)); max-height: calc(100vh - 100px); overflow: auto; box-sizing: border-box; padding: 12px 14px; border: 2px solid var(--accent); border-radius: 6px; background: #0d0c1a; color: var(--fg); font: 1rem/1.5 ui-monospace, Menlo, monospace; }
 @media (max-width: 699px) { #card { top: auto; left: 0; right: 0; bottom: 32px; width: auto; max-height: 45vh; border-radius: 6px 6px 0 0; } }
+@media (max-width: 639px) {
+  #card { bottom: 44px; max-height: min(55vh, calc(100vh - 52px)); }
+}
 #card[hidden] { display: none; }
 #card h2 { margin: 0 0 8px; font-size: 1.125rem; overflow-wrap: anywhere; }
 #card h2:focus-visible { outline: 3px solid var(--fg); outline-offset: 2px; }
 #card dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 0 0 10px; }
 #card dt { color: #a9a3c2; }
 #card dd { margin: 0; overflow-wrap: anywhere; }
-#card button { min-height: 44px; min-width: 44px; padding: 0 14px; border: 2px solid var(--accent); border-radius: 4px; background: transparent; color: var(--fg); font: inherit; cursor: pointer; }
-#card button:focus-visible { outline: 3px solid var(--fg); outline-offset: 2px; }
+#card ol { margin: 0; padding-left: 1.4em; }
+#card li { overflow-wrap: anywhere; }
+#card meter { width: 8em; max-width: 100%; height: 14px; vertical-align: middle; border: 2px solid #a9a3c2; border-radius: 3px; background: #0d0c1a; }
+#card meter::-webkit-meter-bar { background: #0d0c1a; border: 0; height: 100%; }
+#card meter::-webkit-meter-optimum-value, #card meter::-webkit-meter-suboptimum-value, #card meter::-webkit-meter-even-less-good-value { background: var(--accent); }
+#card meter::-moz-meter-bar { background: var(--accent); }
+#card button, #shortcuts button { min-height: 44px; min-width: 44px; padding: 0 14px; border: 2px solid var(--accent); border-radius: 4px; background: transparent; color: var(--fg); font: inherit; cursor: pointer; }
+#card button:focus-visible, #shortcuts button:focus-visible { outline: 3px solid var(--fg); outline-offset: 2px; }
+#shortcuts { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(420px, calc(100vw - 16px)); max-height: calc(100vh - 16px); overflow: auto; box-sizing: border-box; padding: 12px 14px; border: 2px solid var(--accent); border-radius: 6px; background: #0d0c1a; color: var(--fg); font: 1rem/1.5 ui-monospace, Menlo, monospace; }
+#shortcuts[hidden] { display: none; }
+#shortcuts h2 { margin: 0 0 8px; font-size: 1.125rem; }
+#shortcuts h2:focus-visible { outline: 3px solid var(--fg); outline-offset: 2px; }
+#shortcuts dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 0 0 10px; }
+#shortcuts dt { color: #a9a3c2; }
+#shortcuts dd { margin: 0; overflow-wrap: anywhere; }
+@media (max-width: 639px) { #shortcuts { top: 8px; left: 8px; transform: none; width: auto; max-height: calc(100vh - 44px - 16px); } }
+@media (forced-colors: active) { #card, #shortcuts { border-color: CanvasText; background: Canvas; color: CanvasText; } }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+@media (forced-colors: active) {
+  #card meter { border-color: CanvasText; background: Canvas; }
+  #card meter::-webkit-meter-bar { background: Canvas; }
+  #card meter::-webkit-meter-optimum-value, #card meter::-webkit-meter-suboptimum-value, #card meter::-webkit-meter-even-less-good-value { background: Highlight; }
+  #card meter::-moz-meter-bar { background: Highlight; }
+}

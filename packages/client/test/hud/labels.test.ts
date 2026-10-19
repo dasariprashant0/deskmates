@@ -6,7 +6,7 @@ import { NAME_MAX } from '../../src/sim/character'
 
 const main = (sid: string, cwd: string, startedAt = 0): AgentState => ({
   key: `t:${sid}:main`, ref: { provider: 't', sessionId: sid }, cwd, status: 'working', activity: 'typing',
-  openTools: {}, openOrder: [], usage: { input: 0, cacheWrite: 0, cacheRead: 0, output: 0 }, startedAt, lastEventAt: startedAt, children: [],
+  openTools: {}, openOrder: [], recent: [], usage: { input: 0, cacheWrite: 0, cacheRead: 0, output: 0 }, startedAt, lastEventAt: startedAt, children: [],
 })
 const sub = (sid: string, id: string, type: string, startedAt: number, parent = `t:${sid}:main`): AgentState => ({
   ...main(sid, '/x/p', startedAt), key: `t:${sid}:${id}`, ref: { provider: 't', sessionId: sid, agentId: id }, agentType: type, parentKey: parent,

@@ -2,13 +2,15 @@
 import { generateSprite, type Frame, type SpriteSheet } from '@deskmates/sprites'
 import { createDemo, createConnection, createMirror, demoSnapshot, isDemo, readToken, stripFragment, type Mirror, type Status } from './index'
 import { asPriceTable, DEFAULT_META, formatTokens, pricesNote, type PricesMeta } from './hud/cost'
+import { nextTabTarget, shortcutsAction } from './hud/shortcuts'
 import { createAnnouncer } from './hud/announce'
 import { createLabeler } from './hud/labels'
 import { cycleKey, describeTotals, shortDir, summarize, type AgentRow, type Summary } from './hud/summary'
 import { createBitmapCache, drawCharacters, drawFloor, drawFurniture, type Ctx2D } from './render/draw'
+import { COMPACT_HUD_H, compactCamera, compactFocus, fullCamera, isCompact, screenToView, visibleBoxHeight, type Camera } from './render/compact'
 import { fitScale } from './render/fit'
 import { drawHud, type ChipHit } from './render/hud'
-import { isPointerClick, minBoxView, pickCharacter, toView } from './render/pick'
+import { isPointerClick, minBoxView, pickCharacter } from './render/pick'
 import { createLoop } from './render/loop'
 import { PAL } from './render/palette'
 import { defaultLayout, createSim, VIEW_H, VIEW_W, type Sim } from './sim'
@@ -32,6 +34,12 @@ const cardFields = {
   subs: cardField('card-subs'),
 }
 const cardClose = el('card-close', HTMLButtonElement)
+const cardContext = el('card-context', HTMLMeterElement)
+const cardContextText = cardField('card-context-text')
+const cardEvents = el('card-events', HTMLOListElement)
+const shortcutsEl = el('shortcuts', HTMLElement)
+const shortcutsTitle = el('shortcuts-title', HTMLElement)
+const shortcutsClose = el('shortcuts-close', HTMLButtonElement)
 
 const demo = isDemo(location)
 const token = readToken(location.hash)
@@ -146,6 +154,7 @@ const updateMirror = (sm: Summary): void => {
 
 // ---- selection, agent card, HUD ---------------------------------------------------------------
 const HUD_CSS_H = 32
+const hudCssH = (cssW: number): number => (isCompact(cssW) ? COMPACT_HUD_H : HUD_CSS_H)
 let summary: Summary = { agents: [], needsYou: [], totals: { running: 0, thinking: 0, needsYou: 0, errors: 0, tokens: 0, usd: 0, anyExample: false, partialCost: false, prices: DEFAULT_META } }
 let selectedKey: string | undefined
 let hoveredKey: string | undefined
@@ -160,6 +169,7 @@ const cardPriceNote = (): string => {
   const m = pricesMeta()
   return m.source === 'example' ? ' (example prices)' : ` (${pricesNote(m)})`
 }
+let eventsSig: string | undefined
 const fillCard = (r: AgentRow): void => {
   const u = r.usage
   setText(cardFields.name, r.name)
@@ -171,6 +181,19 @@ const fillCard = (r: AgentRow): void => {
   setText(cardFields.cost, `${r.costLabel}${r.cost.known ? cardPriceNote() : ''}`)
   setText(cardFields.elapsed, r.elapsedLabel)
   setText(cardFields.subs, String(r.subagents))
+  setText(cardContextText, r.contextLabel)
+  const pct = r.contextPct ?? 0
+  if (cardContext.value !== pct) cardContext.value = pct
+  cardContext.hidden = r.contextPct === undefined // unknown: text only, no misleading empty bar
+  cardContext.setAttribute('aria-valuetext', r.contextLabel)
+  // The meter announces the value; hide the visible text from AT only while the meter is shown, so it is read once.
+  cardContextText.setAttribute('aria-hidden', String(r.contextPct !== undefined))
+  const sig = r.recent.join('\n')
+  if (sig !== eventsSig) {
+    eventsSig = sig
+    cardEvents.replaceChildren(...r.recent.map((t) => { const li = document.createElement('li'); li.textContent = t; return li }))
+    if (r.recent.length === 0) { const li = document.createElement('li'); li.textContent = 'none yet'; cardEvents.append(li) }
+  }
 }
 /** Hides the card; if focus is inside it, focus goes back to the canvas first so it is never lost. */
 const closeCard = (): void => {
@@ -190,7 +213,17 @@ const refreshSelection = (): void => {
   if (!r) { selectedKey = undefined; closeCard(); return }
   if (cardOpen()) fillCard(r)
 }
-const currentFit = () => fitScale(VIEW_W, VIEW_H, document.documentElement.clientWidth, Math.max(1, document.documentElement.clientHeight - HUD_CSS_H), window.devicePixelRatio || 1)
+/** Camera for this frame: the whole room letterboxed, or under 640 css px a crop that follows the focused agent. Pointer picking reads the same one. */
+const computeCamera = (): Camera => {
+  const w = document.documentElement.clientWidth
+  const boxH = Math.max(1, document.documentElement.clientHeight - hudCssH(w))
+  const dpr = window.devicePixelRatio || 1
+  if (!isCompact(w)) return fullCamera(fitScale(VIEW_W, VIEW_H, w, boxH, dpr))
+  // The open card is a bottom sheet over the canvas: centre the focus in what is still visible above it.
+  const seenH = visibleBoxHeight(document.documentElement.clientHeight, hudCssH(w), cardOpen() ? cardEl.offsetHeight : 0)
+  return compactCamera({ w, h: seenH }, compactFocus(sim.characters(), selectedKey, summary.needsYou.map((r) => r.key)), dpr)
+}
+let camera = computeCamera()
 
 canvas.addEventListener('keydown', (e) => {
   const keys = summary.agents.map((r) => r.key)
@@ -214,7 +247,49 @@ canvas.addEventListener('keydown', (e) => {
   }
   e.preventDefault()
 })
+// ---- shortcuts overlay ------------------------------------------------------------------------
+let returnFocus: HTMLElement | undefined
+let inerted: HTMLElement[] = [] // only what this overlay made inert is restored
+const shortcutsOpen = (): boolean => !shortcutsEl.hidden
+/** `?` binds only on the canvas, inside the dialog or card, or with nothing focused; not in other controls. */
+const shortcutsFocusOk = (): boolean => {
+  const f = document.activeElement
+  return f === null || f === document.body || f === document.documentElement || f === canvas || shortcutsEl.contains(f) || cardEl.contains(f)
+}
+const openShortcuts = (): void => {
+  const f = document.activeElement
+  returnFocus = f instanceof HTMLElement && f !== document.body ? f : canvas
+  shortcutsEl.hidden = false
+  shortcutsTitle.focus()
+  inerted = [canvas, cardEl].filter((n) => !n.inert)
+  for (const n of inerted) n.inert = true
+}
+const closeShortcuts = (): void => {
+  shortcutsEl.hidden = true
+  for (const n of inerted) n.inert = false
+  inerted = []
+  const r = returnFocus
+  const back = r && r.isConnected && !r.closest('[hidden]') ? r : canvas
+  returnFocus = undefined
+  back.focus()
+}
+shortcutsClose.addEventListener('click', closeShortcuts)
 document.addEventListener('keydown', (e) => {
+  const act = shortcutsAction(e, { open: shortcutsOpen(), focusOk: shortcutsFocusOk() })
+  if (act !== 'none') {
+    if (act === 'open') openShortcuts(); else closeShortcuts()
+    e.preventDefault()
+    e.stopImmediatePropagation()
+    return
+  }
+  if (shortcutsOpen()) {
+    if (e.key === 'Tab') { // trap: only the title (tabindex -1) and the Close button live in the dialog
+      const t = nextTabTarget<HTMLElement>([shortcutsClose], document.activeElement instanceof HTMLElement && shortcutsEl.contains(document.activeElement) && document.activeElement !== shortcutsTitle ? document.activeElement : undefined, e.shiftKey)
+      t?.focus()
+      e.preventDefault()
+    }
+    return
+  }
   if (e.key !== 'Escape') return
   if (cardOpen()) { closeCard(); canvas.focus() } else selectedKey = undefined
 })
@@ -222,22 +297,20 @@ cardClose.addEventListener('click', () => { closeCard(); canvas.focus() })
 canvas.addEventListener('pointermove', (e) => {
   const dpr = window.devicePixelRatio || 1
   const b = canvas.getBoundingClientRect()
-  const f = currentFit()
-  const v = toView(f, (e.clientX - b.left) * dpr, (e.clientY - b.top) * dpr)
-  hoveredKey = pickCharacter(sim.characters(), v.x, v.y, minBoxView(f.scale, dpr))
+  const v = screenToView(camera, (e.clientX - b.left) * dpr, (e.clientY - b.top) * dpr)
+  hoveredKey = pickCharacter(sim.characters(), v.x, v.y, minBoxView(camera.scale, dpr))
 })
 canvas.addEventListener('pointerleave', () => { hoveredKey = undefined })
 canvas.addEventListener('click', (e) => {
-  if (!isPointerClick(e)) return // Enter can fire a synthetic click at the centre; keydown handles Enter
+  if (shortcutsOpen() || !isPointerClick(e)) return // Enter can fire a synthetic click at the centre; keydown handles Enter
   const dpr = window.devicePixelRatio || 1
   const b = canvas.getBoundingClientRect()
   const px = (e.clientX - b.left) * dpr
   const py = (e.clientY - b.top) * dpr
   const chip = hudHits.find((h) => px >= h.x && px <= h.x + h.w && py >= h.y && py <= h.y + h.h)
   if (chip) { select(chip.key, true); return }
-  const f = currentFit()
-  const v = toView(f, px, py)
-  const key = pickCharacter(sim.characters(), v.x, v.y, minBoxView(f.scale, dpr))
+  const v = screenToView(camera, px, py)
+  const key = pickCharacter(sim.characters(), v.x, v.y, minBoxView(camera.scale, dpr))
   if (key === undefined) { selectedKey = undefined; closeCard() } else select(key, true)
 })
 
@@ -275,15 +348,16 @@ const draw = (): void => {
   renderStatic(defaultLayout)
   offDraw.drawImage(staticOff, 0, 0)
   drawCharacters(offDraw, sim.characters(), sprites, cache, { selectedKey, hoveredKey })
-  const f = currentFit()
+  camera = computeCamera()
   ctx.imageSmoothingEnabled = false
   ctx.fillStyle = PAL.bg
   ctx.fillRect(0, 0, canvas.width, canvas.height)
-  ctx.drawImage(off, 0, 0, VIEW_W, VIEW_H, f.x, f.y, f.w, f.h)
+  ctx.drawImage(off, camera.srcX, camera.srcY, camera.srcW, camera.srcH, camera.x, camera.y, camera.w, camera.h)
   // HUD band after the integer-scaled blit, in real pixels, so its text is crisp.
   const dpr = window.devicePixelRatio || 1
-  const hudH = Math.round(HUD_CSS_H * dpr)
-  hudHits = drawHud(ctx, summary, { x: 0, y: canvas.height - hudH, w: canvas.width, h: hudH }, dpr, selectedKey)
+  const compact = isCompact(document.documentElement.clientWidth)
+  const hudH = Math.round(hudCssH(document.documentElement.clientWidth) * dpr)
+  hudHits = drawHud(ctx, summary, { x: 0, y: canvas.height - hudH, w: canvas.width, h: hudH }, dpr, selectedKey, compact)
 }
 
 createLoop({

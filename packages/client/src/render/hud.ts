@@ -34,17 +34,19 @@ function marker(c: Ctx2D, kind: Kind, x: number, cy: number, u: number): void {
 }
 
 type Item = { kind?: Kind; text: string; color: string; lead: number }
-type Level = 0 | 1 | 2
+type Level = 0 | 1 | 2 | 3
 
 /**
  * The stats row at three widths: 0 full words, 1 abbreviated counts ('2w 1t 1! 0x') with tokens, 2 counts and cost only.
- * Errors and cost are in every level.
+ * Errors and cost are in every level. Level 3 (compact only) keeps just needs-you, errors and cost.
  */
 function items(t: Totals, level: Level, u: number, hidden: number): Item[] {
-  const counts: [Kind, number, string, string][] = [['working', t.running, 'working', 'w'], ['thinking', t.thinking, 'thinking', 't'], ['needs', t.needsYou, 'needs you', '!'], ['error', t.errors, 'errors', 'x']]
+  const all: [Kind, number, string, string][] = [['working', t.running, 'working', 'w'], ['thinking', t.thinking, 'thinking', 't'], ['needs', t.needsYou, 'needs you', '!'], ['error', t.errors, 'errors', 'x']]
+  const counts = level === 3 ? all.filter(([k]) => k === 'needs' || k === 'error') : all
   const out: Item[] = counts.map(([kind, n, long, short]) => ({ kind, text: level === 0 ? `${n} ${long}` : `${n}${short}`, color: HUD.text, lead: 0 }))
   if (level < 2) out.push({ text: `${formatTokens(t.tokens)}${level === 0 ? ' tokens' : ' tok'}`, color: HUD.text, lead: 0 })
   out.push({ text: `${level === 0 ? 'cost ' : ''}${formatCost({ usd: t.usd, known: true })}${t.partialCost ? '+' : ''}${t.prices.source === 'default' ? ' est.' : ''}`, color: HUD.text, lead: 0 })
+  if (level === 3) return out
   if (hidden > 0) out.push({ text: level === 0 ? `+${hidden} idle` : `+${hidden}`, color: HUD.dim, lead: 0 })
   if (t.anyExample) out.push({ text: level === 0 ? 'example prices' : '(ex)', color: HUD.dim, lead: Math.round(6 * u) })
   return out
@@ -54,8 +56,10 @@ function items(t: Totals, level: Level, u: number, hidden: number): Item[] {
  * Bottom HUD band, drawn in real device pixels (crisp text). `unit` is the device pixel ratio.
  * Returns the hit rects of the needs-you chips it drew. Pure on a Ctx2D; text goes through fillText only.
  * The stats row is measured first and abbreviated until it fits the box, so errors and cost are never cut off.
+ * `compact` (phone width): chips are the full strip height (a 44 CSS px target), the oldest needs-you chip is always drawn
+ * (its label is clipped to fit) and the stats row drops to its shortest form to leave it room.
  */
-export function drawHud(c: Ctx2D, s: Summary, box: Box, unit: number, selectedKey?: string): ChipHit[] {
+export function drawHud(c: Ctx2D, s: Summary, box: Box, unit: number, selectedKey?: string, compact = false): ChipHit[] {
   const u = Math.max(1, unit)
   const pad = Math.round(10 * u)
   const cy = box.y + box.h / 2
@@ -71,9 +75,10 @@ export function drawHud(c: Ctx2D, s: Summary, box: Box, unit: number, selectedKe
   const markerW = Math.round(14 * u)
   const width = (list: Item[]): number => list.reduce((w, i) => w + i.lead + (i.kind ? markerW : 0) + Math.ceil(measure(c, i.text)) + pad, 0)
   const hiddenN = s.hidden ?? 0
+  const minChip = compact && s.needsYou.length > 0 ? Math.round(80 * u) : 0
   let row = items(s.totals, 0, u, hiddenN)
-  for (const level of [1, 2] as const) {
-    if (left + width(row) - pad <= right) break
+  for (const level of compact ? ([1, 2, 3] as const) : ([1, 2] as const)) {
+    if (left + width(row) - pad + minChip <= right) break
     row = items(s.totals, level, u, hiddenN)
   }
   let x = left
@@ -90,15 +95,22 @@ export function drawHud(c: Ctx2D, s: Summary, box: Box, unit: number, selectedKe
 
   // needs-you chips: text label plus a diamond, never colour alone
   const hits: ChipHit[] = []
-  const ch = Math.round(box.h * 0.7)
-  const cyTop = Math.round(cy - ch / 2)
+  const ch = compact ? box.h : Math.round(box.h * 0.7)
+  const cyTop = compact ? box.y : Math.round(cy - ch / 2)
   const reserve = Math.ceil(measure(c, '+99')) + pad
   let shown = 0
   for (const r of s.needsYou.slice(0, MAX_CHIPS)) {
-    const label = `${clip(r.short, 10)}${r.status === 'maybe waiting' ? ' (maybe waiting)' : ''}`
-    const w = Math.ceil(measure(c, label)) + Math.round(26 * u)
+    const suffix = r.status === 'maybe waiting' ? ' (maybe waiting)' : ''
+    let label = `${clip(r.short, 10)}${suffix}`
+    let w = Math.ceil(measure(c, label)) + Math.round(26 * u)
     const more = s.needsYou.length - shown - 1
-    if (x + w + (more > 0 ? reserve : 0) > right) break
+    if (compact && shown === 0) {
+      // the oldest needs-you agent must stay tappable: shrink its label to the room left, never below 44 CSS px wide
+      let n = 10
+      while (x + w > right && n > 1) { label = `${clip(r.short, n--)}${suffix ? ' (?)' : ''}`; w = Math.ceil(measure(c, label)) + Math.round(26 * u) }
+      w = Math.max(w, Math.round(44 * u))
+      if (x + w > right) w = Math.max(0, right - x)
+    } else if (x + w + (more > 0 ? reserve : 0) > right) break
     c.fillStyle = HUD.chipBg
     c.fillRect(x, cyTop, w, ch)
     marker(c, 'needs', x + Math.round(5 * u), cy, u * 0.8)
