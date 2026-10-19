@@ -1,0 +1,372 @@
+{
+ "run_date": "2026-10-19",
+ "note": "Numbers only. Run on one machine under heavy load (load average about 20 during S13 and S14); only Node v26.10.0 was installed.",
+ "S10": {
+  "node": "v26.10.0",
+  "os": "darwin 27.0.0",
+  "pathLength": {
+   "results": [
+    "98:ok",
+    "99:ok",
+    "100:ok",
+    "101:ok",
+    "102:ok",
+    "103:ok",
+    "104:ok",
+    "105:ok",
+    "106:ok",
+    "107:ok",
+    "108:ok",
+    "109:ok",
+    "110:ok",
+    "111:ok",
+    "112:ok"
+   ],
+   "maxOkBytes": 112,
+   "firstFailBytes": null
+  },
+  "realisticPath": {
+   "bytes": 48,
+   "headroomBytes": 64,
+   "maxHomeDirBytes": 85
+  },
+  "roundTripMs": {
+   "n": 200,
+   "p50": 0.13,
+   "p95": 0.28,
+   "p99": 0.6,
+   "max": 0.66
+  },
+  "modeChecks": {
+   "good": [],
+   "dir0755": [
+    "dir-mode"
+   ],
+   "sock0666": [
+    "sock-mode"
+   ],
+   "regularFile": [
+    "sock-not-socket",
+    "sock-mode"
+   ],
+   "symlink": [
+    "sock-symlink",
+    "sock-mode"
+   ]
+  },
+  "ownerCheckNote": "uid comparison implemented; a socket owned by another uid cannot be created without privileges, so only the same-owner pass case ran",
+  "takeover": {
+   "liveProbe": "connect",
+   "liveBindSecond": "EADDRINUSE",
+   "staleFileRemains": true,
+   "staleProbe": "ECONNREFUSED",
+   "rebindAfterProbeAndUnlink": "bound"
+  },
+  "pass": {
+   "roundTripP95Under50ms": true,
+   "checksDetectBadModesAndTypes": true
+  }
+ },
+ "S10_long_paths": {
+  "node": "v26.10.0",
+  "base": 60,
+  "rows": [
+   {
+    "len": 100,
+    "listen": "ok",
+    "existsAtFullPath": true,
+    "connect": "ok"
+   },
+   {
+    "len": 103,
+    "listen": "ok",
+    "existsAtFullPath": true,
+    "connect": "ok"
+   },
+   {
+    "len": 104,
+    "listen": "ok",
+    "existsAtFullPath": true,
+    "connect": "ok"
+   },
+   {
+    "len": 105,
+    "listen": "ok",
+    "existsAtFullPath": true,
+    "connect": "ok"
+   },
+   {
+    "len": 110,
+    "listen": "ok",
+    "existsAtFullPath": true,
+    "connect": "ok"
+   },
+   {
+    "len": 120,
+    "listen": "ok",
+    "existsAtFullPath": true,
+    "connect": "ok"
+   },
+   {
+    "len": 150,
+    "listen": "ok",
+    "existsAtFullPath": true,
+    "connect": "ok"
+   },
+   {
+    "len": 200,
+    "listen": "ok",
+    "existsAtFullPath": true,
+    "connect": "ok"
+   },
+   {
+    "len": 300,
+    "listen": "EINVAL"
+   }
+  ]
+ },
+ "S13_first_run": {
+  "node": "v26.10.0",
+  "os": "darwin 27.0.0",
+  "variants": [
+   {
+    "name": "A hook, server up (reply none)",
+    "n": 100,
+    "p50": 163.5,
+    "p95": 347.1,
+    "p99": 606.7,
+    "max": 606.7,
+    "firstRun": 169.4,
+    "exitNot0": 0,
+    "stdoutNonEmpty": 0
+   },
+   {
+    "name": "B hook, server absent (fail-open path)",
+    "n": 100,
+    "p50": 158.9,
+    "p95": 267,
+    "p99": 323.1,
+    "max": 323.1,
+    "firstRun": 152.5,
+    "exitNot0": 0,
+    "stdoutNonEmpty": 0
+   },
+   {
+    "name": "C guard false (script unreadable): sh only",
+    "n": 100,
+    "p50": 13.7,
+    "p95": 40.5,
+    "p99": 55.9,
+    "max": 55.9,
+    "firstRun": 12,
+    "exitNot0": 0,
+    "stdoutNonEmpty": 0
+   },
+   {
+    "name": "D baseline: node -e (runtime start only)",
+    "n": 100,
+    "p50": 160.7,
+    "p95": 306.1,
+    "p99": 610.8,
+    "max": 610.8,
+    "firstRun": 180.7,
+    "exitNot0": 0,
+    "stdoutNonEmpty": 0
+   },
+   {
+    "name": "E baseline: sh exit 0",
+    "n": 100,
+    "p50": 17.9,
+    "p95": 40.8,
+    "p99": 66.2,
+    "max": 66.2,
+    "firstRun": 19.4,
+    "exitNot0": 0,
+    "stdoutNonEmpty": 0
+   }
+  ],
+  "pass": {
+   "hookServerUpP95Under150ms": false,
+   "noNonZeroExitsOrOutput": true
+  }
+ },
+ "S13_rerun": {
+  "node": "v26.10.0",
+  "os": "darwin 27.0.0",
+  "variants": [
+   {
+    "name": "A2 node hook, server up",
+    "n": 100,
+    "p50": 149.6,
+    "p95": 236,
+    "p99": 409.6,
+    "max": 409.6,
+    "firstRun": 175.2,
+    "exitNot0": 0,
+    "stdoutNonEmpty": 0
+   },
+   {
+    "name": "D2 baseline: node -e (runtime start only)",
+    "n": 100,
+    "p50": 154.1,
+    "p95": 275.7,
+    "p99": 469.6,
+    "max": 469.6,
+    "firstRun": 137,
+    "exitNot0": 0,
+    "stdoutNonEmpty": 0
+   },
+   {
+    "name": "N node --version (runtime floor)",
+    "n": 100,
+    "p50": 148.5,
+    "p95": 390.6,
+    "p99": 538,
+    "max": 538,
+    "firstRun": 276,
+    "exitNot0": 0,
+    "stdoutNonEmpty": 0
+   },
+   {
+    "name": "H python3 -c pass (system python)",
+    "n": 100,
+    "p50": 54.5,
+    "p95": 115.9,
+    "p99": 166.4,
+    "max": 166.4,
+    "firstRun": 47.2,
+    "exitNot0": 0,
+    "stdoutNonEmpty": 0
+   },
+   {
+    "name": "E sh exit 0 (floor)",
+    "n": 100,
+    "p50": 12.7,
+    "p95": 29.8,
+    "p99": 81.1,
+    "max": 81.1,
+    "firstRun": 18.5,
+    "exitNot0": 0,
+    "stdoutNonEmpty": 0
+   }
+  ],
+  "pass": {
+   "nodeHookP95Under150ms": false
+  }
+ },
+ "S14": {
+  "node": "v26.10.0",
+  "somaxconnNote": "macOS kern.ipc.somaxconn caps the listen backlog",
+  "baselineServerUp": {
+   "n": 10,
+   "outcomes": {
+    "acked": 10
+   },
+   "connectSucceeded": 10,
+   "exitNonZero": 0,
+   "stdoutNonEmpty": 0,
+   "wallMs": {
+    "min": 129,
+    "median": 138,
+    "max": 164
+   },
+   "under700ms": 10
+  },
+  "serverStateAfterSigstop": "T",
+  "serverStopped": {
+   "n": 20,
+   "outcomes": {
+    "no-ack-500ms": 20
+   },
+   "connectSucceeded": 20,
+   "exitNonZero": 0,
+   "stdoutNonEmpty": 0,
+   "wallMs": {
+    "min": 639,
+    "median": 669,
+    "max": 684
+   },
+   "under700ms": 20
+  },
+  "floodWhileStopped": {
+   "attempts": 300,
+   "connected": 108,
+   "fail_ECONNREFUSED": 192
+  },
+  "clientsAfterFloodWhileStopped": {
+   "n": 5,
+   "outcomes": {
+    "error-ECONNREFUSED": 5
+   },
+   "connectSucceeded": 0,
+   "exitNonZero": 0,
+   "stdoutNonEmpty": 0,
+   "wallMs": {
+    "min": 123,
+    "median": 129,
+    "max": 160
+   },
+   "under700ms": 5
+  },
+  "serverStateAfterSigcont": "S",
+  "afterResume": {
+   "n": 5,
+   "outcomes": {
+    "acked": 5
+   },
+   "connectSucceeded": 5,
+   "exitNonZero": 0,
+   "stdoutNonEmpty": 0,
+   "wallMs": {
+    "min": 129,
+    "median": 131,
+    "max": 133
+   },
+   "under700ms": 5
+  },
+  "pass": {
+   "connectSucceededWhileStopped": true,
+   "allExitedZeroEmptyUnder700ms": true
+  }
+ },
+ "S16": {
+  "node": "v26.10.0",
+  "variants": [
+   {
+    "name": "default (no protection), --inspect-port=0",
+    "trials": 10,
+    "inspectorOpened": 10,
+    "processSurvived": 10
+   },
+   {
+    "name": "SIGUSR1 handler only",
+    "trials": 10,
+    "inspectorOpened": 0,
+    "processSurvived": 10
+   },
+   {
+    "name": "--disable-sigusr1 only",
+    "trials": 10,
+    "inspectorOpened": 0,
+    "processSurvived": 10
+   },
+   {
+    "name": "--disable-sigusr1 plus a SIGUSR1 handler",
+    "trials": 10,
+    "inspectorOpened": 0,
+    "processSurvived": 10
+   }
+  ],
+  "disableSigusr1FlagAccepted": true,
+  "defaultPort9229": {
+   "portWasFree": true,
+   "inspectorOpened": true,
+   "url": "ws://127.0.0.1:(open)"
+  },
+  "summaryForSpec": [
+   "SIGUSR1 handler only: opened 0/10, survived 10/10",
+   "--disable-sigusr1 only: opened 0/10, survived 10/10",
+   "--disable-sigusr1 plus a SIGUSR1 handler: opened 0/10, survived 10/10"
+  ]
+ }
+}
