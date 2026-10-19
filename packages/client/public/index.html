@@ -10,7 +10,7 @@
 <main>
 <h1 class="sr-only">deskmates</h1>
 <canvas id="office" tabindex="0" role="application" aria-label="Agent office" aria-describedby="help summary agents"></canvas>
-<p id="help" class="sr-only">Office view of your Claude Code agents. Arrow keys select an agent. Enter or Space opens its details card and moves focus into it. N jumps to agents that need you. A toggles between active agents only and all agents. Escape closes the card and returns here.</p>
+<p id="help" class="sr-only">Office view of your Claude Code agents. Arrow keys select an agent. Enter or Space opens its details card and moves focus into it. N jumps to agents that need you. A toggles between active agents only and all agents. Question mark opens the keyboard shortcuts list. Escape closes the card and returns here.</p>
 <p id="summary" class="sr-only"></p>
 <ul id="agents" class="sr-only" role="list"></ul>
 <div id="live" class="sr-only" aria-live="polite"></div>
@@ -23,12 +23,26 @@
     <dt>Tool</dt><dd id="card-tool"></dd>
     <dt>Project</dt><dd id="card-dir"></dd>
     <dt>Model</dt><dd id="card-model"></dd>
+    <dt>Context</dt><dd><meter id="card-context" min="0" max="100" value="0" aria-label="Context window used"></meter> <span id="card-context-text" aria-hidden="true"></span></dd>
     <dt>Tokens</dt><dd id="card-tokens"></dd>
     <dt>Est. cost</dt><dd id="card-cost"></dd>
     <dt>Elapsed</dt><dd id="card-elapsed"></dd>
     <dt>Subagents</dt><dd id="card-subs"></dd>
+    <dt>Recent</dt><dd><ol id="card-events" aria-label="Recent events, newest first"></ol></dd>
   </dl>
   <button id="card-close" type="button">Close (Esc)</button>
+</aside>
+<aside id="shortcuts" role="dialog" aria-modal="true" aria-labelledby="shortcuts-title" hidden>
+  <h2 id="shortcuts-title" tabindex="-1">Keyboard shortcuts</h2>
+  <dl>
+    <dt>Arrow keys</dt><dd>Select the previous or next agent</dd>
+    <dt>Enter or Space</dt><dd>Open the details card for the selected agent</dd>
+    <dt>N</dt><dd>Jump to the next agent that needs you</dd>
+    <dt>A</dt><dd>Show active agents only, or all agents</dd>
+    <dt>Esc</dt><dd>Close the card or this list</dd>
+    <dt>?</dt><dd>Show or hide this list</dd>
+  </dl>
+  <button id="shortcuts-close" type="button">Close (Esc)</button>
 </aside>
 </main>
 <script src="/app.js" defer></script>

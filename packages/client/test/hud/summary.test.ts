@@ -7,10 +7,30 @@ const DEF = { source: 'default', asOf: '2026-10-18' } as const
 
 const mk = (sid: string, o: Partial<AgentState> = {}): AgentState => ({
   key: `t:${sid}:main`, ref: { provider: 't', sessionId: sid }, cwd: '/home/u/proj', status: 'working', activity: 'typing',
-  openTools: {}, openOrder: [], usage: { input: 0, cacheWrite: 0, cacheRead: 0, output: 0 }, startedAt: 0, lastEventAt: 0, children: [], ...o,
+  openTools: {}, openOrder: [], recent: [], usage: { input: 0, cacheWrite: 0, cacheRead: 0, output: 0 }, startedAt: 0, lastEventAt: 0, children: [], ...o,
 })
 const office = (...a: AgentState[]): OfficeState => ({ agents: Object.fromEntries(a.map((x) => [x.key, x])), order: a.map((x) => x.key), seq: 0 })
 const NOW = 100_000
+
+describe('card fields', () => {
+  test('context and recent', () => {
+    const r = summarize(office(mk('a', { model: 'x', contextTokens: 84_000, recent: [{ at: 1, label: 'one' }, { at: 2, label: 'two' }] })), EXAMPLE_PRICES, EX, NOW).agents[0]!
+    expect(r).toMatchObject({ contextTokens: 84_000, contextPct: 42, contextLabel: '42% of 200K (assumed window)', recent: ['two', 'one'] })
+  })
+  test('unknown context and a missing recent (older server) do not throw', () => {
+    const a = mk('a') as Partial<AgentState>
+    delete a.recent
+    const r = summarize(office(a as AgentState), EXAMPLE_PRICES, EX, NOW).agents[0]!
+    expect(r).toMatchObject({ contextPct: undefined, contextLabel: 'unknown', recent: [] })
+  })
+})
+
+describe('bad context tokens', () => {
+  test.each([-5, NaN, Infinity])('%s is unknown, not 0%%', (n) => {
+    const r = summarize(office(mk('a', { contextTokens: n })), EXAMPLE_PRICES, EX, NOW).agents[0]!
+    expect(r).toMatchObject({ contextPct: undefined, contextLabel: 'unknown' })
+  })
+})
 
 describe('summarize', () => {
   test('empty state', () => {

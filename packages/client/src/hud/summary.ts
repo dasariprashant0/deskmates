@@ -1,6 +1,7 @@
 import type { AgentState, OfficeState, PriceTable, Usage } from '@deskmates/core'
 import { CELEBRATE_MS, deriveName } from '../sim/character'
 import { labelAgents, type AgentLabel } from './labels'
+import { contextLabel, contextPercent } from './context'
 import { estimateCost, formatCost, formatElapsed, formatTokens, pricesNote, type CostEstimate, type PricesMeta } from './cost'
 
 export const ENDED_GRACE_MS = CELEBRATE_MS
@@ -26,6 +27,13 @@ export type AgentRow = {
   subagents: number
   cwd: string | undefined
   model: string | undefined
+  /** Prompt size of the latest request, if known. */
+  contextTokens: number | undefined
+  /** 0-100 integer of the ASSUMED window, undefined when unknown. */
+  contextPct: number | undefined
+  contextLabel: string
+  /** Last events, newest first; names only, shown as text. */
+  recent: string[]
   /** When it started waiting (needs-you sorting). */
   since: number
 }
@@ -66,6 +74,10 @@ const row = (a: AgentState, prices: PriceTable, now: number, label: AgentLabel |
     subagents: a.children.length,
     cwd: a.cwd,
     model: a.model,
+    contextTokens: a.contextTokens,
+    contextPct: contextPercent(a.contextTokens, a.model),
+    contextLabel: contextLabel(a.contextTokens, a.model),
+    recent: (a.recent ?? []).map((r) => r.label).reverse(), // `recent` is absent on state from an older server
     since: a.attention?.since ?? a.lastEventAt,
   }
 }

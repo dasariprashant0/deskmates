@@ -9,17 +9,17 @@ const USER = { source: 'user', asOf: '2026-10-18' } as const
 const DEF = { source: 'default', asOf: '2026-10-18' } as const
 
 type Op = { op: string; args: unknown[] }
-const recorder = (): { ctx: Ctx2D; ops: Op[] } => {
+const recorder = (charW = 7): { ctx: Ctx2D; ops: Op[] } => {
   const ops: Op[] = []
   const ctx = new Proxy({} as Record<string, unknown>, {
-    get: (_t, p: string) => (p === 'measureText' ? (s: string) => ({ width: s.length * 7 }) : (...args: unknown[]) => { ops.push({ op: p, args }) }),
+    get: (_t, p: string) => (p === 'measureText' ? (s: string) => ({ width: s.length * charW }) : (...args: unknown[]) => { ops.push({ op: p, args }) }),
     set: (_t, p: string, v: unknown) => { ops.push({ op: `set:${p}`, args: [v] }); return true },
   }) as unknown as Ctx2D
   return { ctx, ops }
 }
 const mk = (sid: string, o: Partial<AgentState> = {}): AgentState => ({
   key: `t:${sid}:main`, ref: { provider: 't', sessionId: sid }, cwd: `/home/u/${sid}`, status: 'working', activity: 'typing',
-  openTools: {}, openOrder: [], usage: { input: 0, cacheWrite: 0, cacheRead: 0, output: 0 }, startedAt: 0, lastEventAt: 0, children: [], ...o,
+  openTools: {}, openOrder: [], recent: [], usage: { input: 0, cacheWrite: 0, cacheRead: 0, output: 0 }, startedAt: 0, lastEventAt: 0, children: [], ...o,
 })
 const office = (...a: AgentState[]): OfficeState => ({ agents: Object.fromEntries(a.map((x) => [x.key, x])), order: a.map((x) => x.key), seq: 0 })
 const box = { x: 0, y: 500, w: 1600, h: 40 }
@@ -167,4 +167,56 @@ describe('hud price label', () => {
   test('default: ~$X est., no example marker', () => { const a = run(DEF); expect(a).toContain('~$2.00 est.'); expect(a).not.toContain('example prices') })
   test('user: ~$X without est.', () => { const a = run(USER); expect(a).toContain('~$2.00'); expect(a).not.toContain('est.') })
   test('example: marker only', () => { const a = run(EX); expect(a).toContain('example prices'); expect(a).not.toContain('est.') })
+})
+
+describe('drawHud compact (44 px strip)', () => {
+  const waits = ['alpha', 'bravo', 'charlie', 'delta'].map((s, i) => mk(s, { status: 'waiting', attention: { toolUseId: s, source: 'hook', since: i } }))
+  const busy = summarize(
+    office(...Array.from({ length: 12 }, (_, i) => mk(`w${i}`, { model: 'example-model', usage: { input: 3_000_000, cacheWrite: 0, cacheRead: 0, output: 0 } })), mk('e', { status: 'error' }), ...waits),
+    EXAMPLE_PRICES, DEF, 0,
+  )
+  const idle = summarize(office(mk('a')), EXAMPLE_PRICES, USER, 0)
+  const overlap = (a: { x: number; w: number }, b: { x: number; w: number }): boolean => a.x < b.x + b.w && b.x < a.x + a.w
+  test.each([[320, 1], [360, 1], [320, 2], [360, 3], [375, 2]])('at %i css px, dpr %i: chips are >= 44 css px tall, inside the box, and never overlap', (w, dpr) => {
+    const b = { x: 0, y: 0, w: w * dpr, h: 44 * dpr }
+    const r = recorder(7 * dpr) // text scales with the device pixel ratio, like the real 14 css px font
+    const hits = drawHud(r.ctx, busy, b, dpr, undefined, true)
+    expect(hits.length).toBeGreaterThanOrEqual(1) // the oldest needs-you agent is always tappable
+    for (const h of hits) {
+      expect(h.h / dpr).toBeGreaterThanOrEqual(44)
+      expect(h.w / dpr).toBeGreaterThanOrEqual(44)
+      expect(h.x).toBeGreaterThanOrEqual(0)
+      expect(h.x + h.w).toBeLessThanOrEqual(b.w)
+      expect(h.y).toBeGreaterThanOrEqual(b.y)
+      expect(h.y + h.h).toBeLessThanOrEqual(b.y + b.h)
+    }
+    for (let i = 0; i < hits.length; i++) for (let j = i + 1; j < hits.length; j++) expect(overlap(hits[i] as never, hits[j] as never)).toBe(false)
+    expect(hits[0]?.key).toBe('t:alpha:main')
+  })
+  test.each([320, 360])('at %i px no text is cut off or drawn under a chip, and errors + cost stay visible', (w) => {
+    const r = recorder()
+    const hits = drawHud(r.ctx, busy, { x: 0, y: 0, w, h: 44 }, 1, undefined, true)
+    const stats = r.ops.filter((o) => o.op === 'fillText')
+    for (const o of stats) {
+      const x = Number(o.args[1])
+      const end = x + String(o.args[0]).length * 7
+      expect(end).toBeLessThanOrEqual(w)
+      // text that starts inside a chip must be chip text (label), i.e. stay within that chip
+      const h = hits.find((c) => x >= c.x && x < c.x + c.w)
+      if (h) expect(end).toBeLessThanOrEqual(h.x + h.w)
+    }
+    const all = texts(r.ops).join(' | ')
+    expect(all).toMatch(/1x|1 errors/)
+    expect(all).toContain('~$')
+  })
+  test('with nothing waiting it behaves like the normal row, in a taller strip', () => {
+    const r = recorder()
+    expect(drawHud(r.ctx, idle, { x: 0, y: 0, w: 360, h: 44 }, 1, undefined, true)).toEqual([])
+    expect(texts(r.ops).join(' ')).toContain('~$')
+  })
+  test('non-compact chips keep their old 70 percent height', () => {
+    const r = recorder()
+    const hits = drawHud(r.ctx, busy, { x: 0, y: 0, w: 1600, h: 32 }, 1)
+    expect(hits[0]?.h).toBe(Math.round(32 * 0.7))
+  })
 })
