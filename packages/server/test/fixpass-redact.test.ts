@@ -10,7 +10,7 @@ import { TOKEN43 as TOKEN } from './token'
 
 const agent = (o: Partial<AgentState>): AgentState => ({
   key: 'claude:s:main', ref: { provider: 'claude', sessionId: 's' }, status: 'idle', activity: 'idle',
-  openTools: {}, openOrder: [], usage: { input: 0, cacheWrite: 0, cacheRead: 0, output: 0 },
+  openTools: {}, openOrder: [], recent: [], usage: { input: 0, cacheWrite: 0, cacheRead: 0, output: 0 },
   startedAt: 0, lastEventAt: 0, children: [], ...o,
 })
 const st = (a: AgentState): OfficeState => ({ ...emptyState(), agents: { [a.key]: a }, order: [a.key] })
@@ -98,5 +98,15 @@ describe('snapshot over a real WebSocket', () => {
     expect(snap).toContain('~/work/proj')
     expect(snap).not.toContain(home)
     expect(srv.bus.state().agents['claude:sesshome:main']?.cwd).toBe(cwd) // server-side state untouched
+  })
+})
+
+describe('redactHome on recent labels', () => {
+  it('home paths become ~ and secret-looking tokens become [redacted]', () => {
+    const a = agent({ recent: [{ at: 1, label: 'Read: /Users/bob/proj/a.ts' }, { at: 2, label: 'Bash: curl -H sk-ant-abcdefgh12345678' }] })
+    const r = one(redactHome(st(a), '/Users/bob'))
+    expect(r.recent[0]?.label).toBe('Read: ~/proj/a.ts')
+    expect(r.recent[1]?.label).toBe('Bash: curl -H [redacted]')
+    expect(JSON.stringify(r)).not.toContain('sk-ant-')
   })
 })

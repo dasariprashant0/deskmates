@@ -339,3 +339,17 @@ describe('close', () => {
     expect(await attempt('/ws', [PROTO, TOKEN])).toMatchObject({ status: 503 })
   })
 })
+
+describe('recent labels on the wire', () => {
+  beforeEach(() => start({ homeDir: '/Users/bob' }))
+
+  it('snapshot labels carry ~ for the home dir and [redacted] for token-looking strings', async () => {
+    bus.publish({ kind: 'tool.start', ts: 1, agent: ag, toolUseId: 't1', name: 'Bash', summary: 'Bash: cat /Users/bob/p/a.ts sk-ant-abcdefgh12345678' })
+    const c = await connect()
+    await until(() => c.raw.length > 0)
+    const raw = c.raw[0]!
+    expect(raw).toContain('Bash: cat ~/p/a.ts [redacted]')
+    expect(raw).not.toContain('/Users/bob')
+    expect(raw).not.toContain('sk-ant-')
+  })
+})

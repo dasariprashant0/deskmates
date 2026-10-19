@@ -42,6 +42,7 @@ The v0.1 server exposes no state-changing endpoint. What exists, and how it was 
 - Token: at least 32 characters from `[A-Za-z0-9_-]`, compared in constant time. It travels in the URL fragment of the launch link (`http://127.0.0.1:PORT/#t=TOKEN`), which browsers never send to the server, never put in `Referer`, and which the page script should clear with `history.replaceState`. It is presented to the WebSocket as the second `Sec-WebSocket-Protocol` entry after `deskmates.v1`, and to `/api/status` as `Authorization: Bearer`. A query-string token is never accepted.
 - WebSocket: upgrade checks Host, Origin and token before upgrading; limits on clients, message size, queue and slow readers; heartbeat; at most 5 `resync` per second per client; only `resync` is honored.
 - Privacy: snapshots and event frames replace the home directory with `~`; `tool_result` bodies are never carried; `/api/status` carries counts and error codes only.
+- Card data: `AgentState` carries `recent` (at most 5 labels: tool name plus a restricted summary, tool name only for Grep, Glob, Agent and Task) and `contextTokens` (a number). Labels are redacted server-side on every send path and rendered with `textContent` only.
 - Verified by: the Node test suite (337 server tests), an independent live attack run of about 110 attacks (Host, Origin, subprotocol, traversal, smuggling, WebSocket abuse, timeouts, leaks; no critical or high findings), and a design review against this document.
 
 ### Known limits and conditions for v0.2 (approve and deny)

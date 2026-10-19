@@ -28,6 +28,7 @@ const fresh = (ref: AgentRef, ts: number): AgentState => ({
   openTools: {},
   openOrder: [],
   usage: { input: 0, cacheWrite: 0, cacheRead: 0, output: 0 },
+  recent: [],
   startedAt: ts,
   lastEventAt: ts,
   children: [],
@@ -37,6 +38,22 @@ const currentOf = (openTools: Record<string, OpenTool>, openOrder: string[]): Ag
   const id = openOrder.at(-1)
   const t = id === undefined ? undefined : openTools[id]
   return id !== undefined && t ? { toolUseId: id, ...t } : undefined
+}
+
+const RECENT_MAX = 5
+const LABEL_MAX = 80
+// Strips control, bidi and zero-width chars, collapses whitespace, caps by code points.
+const clean = (s: string): string =>
+  [...s.replace(/[\u200b-\u200f\u202a-\u202e\u2028\u2029\u2066-\u2069\u061c\ufeff]/g, '').replace(/\s+/g, ' ').replace(/[\u0000-\u001f\u007f-\u009f]/g, '').trim()].slice(0, LABEL_MAX).join('')
+// Tools whose summary is free user text (pattern, description): the label is the tool name only.
+const NAME_ONLY = new Set(['Grep', 'Glob', 'Agent', 'Task'])
+// The provider's summary is already the whole display label ('Read: a.ts'), so use it as is.
+const toolLabel = (name: string, summary: string): string => (summary && !NAME_ONLY.has(name) ? summary : name)
+// `recent` may be missing on state decoded from an older server. An entry equal to the newest one is dropped.
+const pushRecent = (a: AgentState, at: number, label: string): AgentState['recent'] => {
+  const prev = a.recent ?? []
+  const l = clean(label)
+  return prev.at(-1)?.label === l ? prev : [...prev, { at, label: l }].slice(-RECENT_MAX)
 }
 
 // Returns the patch for one agent; everything is copied, nothing mutated.
@@ -62,7 +79,7 @@ const apply = (a: AgentState, e: NormalizedEvent): Partial<AgentState> => {
     case 'tool.start': {
       const openTools = { ...omit(a.openTools, e.toolUseId), [e.toolUseId]: { name: e.name, summary: e.summary, startedAt: e.ts } }
       const openOrder = [...a.openOrder.filter((id) => id !== e.toolUseId), e.toolUseId]
-      return { openTools, openOrder, currentTool: currentOf(openTools, openOrder), status: terminal(a.status) ? a.status : a.attention ? 'waiting' : 'working' }
+      return { openTools, openOrder, currentTool: currentOf(openTools, openOrder), status: terminal(a.status) ? a.status : a.attention ? 'waiting' : 'working', recent: pushRecent(a, e.ts, toolLabel(e.name, e.summary)) }
     }
     case 'tool.end': {
       const isOpen = has(a.openTools, e.toolUseId)
@@ -70,6 +87,7 @@ const apply = (a: AgentState, e: NormalizedEvent): Partial<AgentState> => {
       const openOrder = isOpen ? a.openOrder.filter((id) => id !== e.toolUseId) : a.openOrder
       const patch: Partial<AgentState> = isOpen ? { openTools, openOrder, currentTool: currentOf(openTools, openOrder) } : {}
       if (isOpen && e.isError) patch.lastError = { toolUseId: e.toolUseId, at: e.ts }
+      if (isOpen && e.isError) patch.recent = pushRecent(a, e.ts, `${a.openTools[e.toolUseId]!.name} failed`)
       if (a.attention?.toolUseId === e.toolUseId) {
         patch.attention = undefined
         patch.status = statusFor(a, undefined, openTools)
@@ -77,12 +95,15 @@ const apply = (a: AgentState, e: NormalizedEvent): Partial<AgentState> => {
       return patch
     }
     case 'attention':
-      return { attention: { toolUseId: e.toolUseId, source: e.source, since: e.ts, ...(e.requestId !== undefined && { requestId: e.requestId }) }, status: terminal(a.status) ? a.status : 'waiting' } // terminal agents record attention but keep their status
+      return { recent: pushRecent(a, e.ts, 'needs you'), attention: { toolUseId: e.toolUseId, source: e.source, since: e.ts, ...(e.requestId !== undefined && { requestId: e.requestId }) }, status: terminal(a.status) ? a.status : 'waiting' } // terminal agents record attention but keep their status
     case 'attention.resolved':
-      return a.attention?.toolUseId === e.toolUseId ? { attention: undefined, status: statusFor(a, undefined, a.openTools) } : {}
+      return a.attention?.toolUseId === e.toolUseId
+        ? { attention: undefined, status: statusFor(a, undefined, a.openTools), recent: pushRecent(a, e.ts, e.decision === 'allow' ? 'allowed' : e.decision === 'deny' ? 'denied' : 'resolved') }
+        : {}
     case 'usage':
       return {
         model: e.model,
+        contextTokens: e.input + e.cacheRead + e.cacheWrite,
         usage: {
           input: a.usage.input + e.input,
           cacheWrite: a.usage.cacheWrite + e.cacheWrite,
@@ -91,7 +112,7 @@ const apply = (a: AgentState, e: NormalizedEvent): Partial<AgentState> => {
         },
       }
     case 'agent.end':
-      return { status: e.reason === 'stop' ? 'done' : e.reason, endedAt: e.ts, attention: undefined }
+      return { status: e.reason === 'stop' ? 'done' : e.reason, endedAt: e.ts, attention: undefined, recent: pushRecent(a, e.ts, `ended (${e.reason})`) }
     case 'message':
       return {}
     default: {
