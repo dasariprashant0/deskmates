@@ -13,6 +13,86 @@ The controls differ for the two adversaries, and neither set stops the other.
 - A. Malicious web page. Stopped by exact `Host`, a present exact same-origin `Origin`, `Sec-Fetch-Site: same-origin` on every state-changing request (v0.1's "missing Origin allowed" and "refuse only cross-site" are too weak for decide), `frame-ancestors`, CSP, a user gesture and dwell. Not stopped: script running inside our own origin (D5, R-B).
 - B. Prompt-injected model, or any other process of the same user. It can run `curl`, read any file, env var and `ps` argv, and forge `Origin` and `Sec-Fetch-*`, so header checks do nothing against it. The decide capability must therefore not exist on disk, in env, in argv or in the launch URL; it is delivered out of band to the human (a pairing code printed on the terminal where deskmates runs, exchanged over loopback for a grant held in page memory). Residual: an agent that can read that terminal or drive the user's browser defeats it. The hook (ingest) secret is readable by B by necessity, so it is not a protected capability: it authenticates the hook peer, and whoever holds it can answer the hook, take over the socket and self-approve (the same-uid ceiling, H8, R-A). It must differ from the browser grant and the read token. Requests forged through our server only social-engineer the user (labelled "reported by hook", transcript badge; `SPEC.md` section 4.4). The same-uid ceiling: a same-uid process can already edit Claude Code settings or run `claude`, so deskmates adds no capability against it; it must only not lower the bar for the normal flow and not widen the blast radius (a user-global install reaches every project).
 
+### Which threats apply to v0.2 (slice 1 only, OQ21)
+
+On 2026-10-19 the owner decided OQ21 = (a): browser approve and deny stay OFF and v0.2 is slice 1 only (see `docs/v0.2/SPEC.md`, "Scope after S3"). No threat is deleted and none is re-rated except where the Slice 1 note says so explicitly. "no (parked)" means the threat only exists if slice 2 is reopened.
+
+| Threat | Applies to slice 1 | Slice 1 note |
+|---|---|---|
+| I1 | yes |  |
+| I2 | yes |  |
+| I3 | yes |  |
+| I4 | yes |  |
+| I5 | yes |  |
+| I6 | yes | S3 measured: the first hook to answer wins, so a foreign allow can pre-empt the dialog with or without deskmates; doctor and the card banner say so |
+| I7 | no (parked) | deskmates never emits allow in slice 1, so it cannot override a deny rule |
+| I8 | yes |  |
+| I9 | yes |  |
+| I10 | yes | banner and doctor only; Approve gating parked |
+| I11 | yes |  |
+| I12 | yes | Playwright for the rebinding harness |
+| I13 | yes | doctor reports the version; control refusal parked |
+| H1 | yes |  |
+| H2 | yes | a forged request can only create a fake Needs-you entry; nothing can be approved. Slice 1 rating: Low |
+| H3 | yes |  |
+| H4 | yes |  |
+| H5 | yes |  |
+| H6 | yes | the hook still withholds the payload until the server proves identity |
+| H7 | yes | raw display window is R87 |
+| H8 | yes | slice 1 rating: Medium, not Critical. A takeover cannot self-approve because the slice 1 hook cannot print allow or deny (R69); it yields fake Needs-you entries and a copy of the payloads sent to the impostor |
+| H9 | yes | used for the transcript badge and E1 correlation only |
+| H10 | yes |  |
+| H11 | yes |  |
+| H12 | yes | the server holds raw requests and the read token in memory |
+| H13 | no (parked) | nothing is held in slice 1; the hook exits at the ack |
+| H14 | yes |  |
+| H15 | yes | slice 1 only; new with the rescope |
+| D1 | yes | read-only card shows the raw payload |
+| D2 | yes |  |
+| D3 | yes | display half only |
+| D4 | no (parked) | per-tool approval rendering parked; the read-only card shows every key |
+| D5 | yes | the read-only card renders hostile text |
+| D6 | no (parked) | no Approve control; frame-ancestors and the headers stay as defence in depth |
+| D7 | yes | if notifications ship (off by default) |
+| D8 | yes |  |
+| D9 | yes | the page says deskmates cannot approve or deny |
+| D10 | yes | entries clear on tool end or session end; the decision half is parked |
+| D11 | yes | every key is shown; unknown-key flagging parked |
+| D12 | yes |  |
+| D13 | no (parked) | approval-time URL checks parked; the read-only card shows the raw URL |
+| D14 | no (parked) | approval-time path checks parked |
+| X1 | yes | applies to the POST `/api/exchange` only (exact Host, present exact Origin, same-origin); the decide half is parked |
+| X2 | no (parked) |  |
+| X3 | no (parked) |  |
+| X4 | no (parked) |  |
+| X5 | no (parked) |  |
+| X6 | no (parked) |  |
+| X7 | no (parked) |  |
+| X8 | no (parked) |  |
+| X9 | no (parked) |  |
+| X10 | yes | nonce guessing and rate limit; pairing-code half parked |
+| X11 | yes | launch nonce on `/dev/tty`; read token reachable by a nonce race; pairing-code half parked |
+| X12 | no (parked) |  |
+| X13 | no (parked) |  |
+| X14 | yes | Needs-you flood and cap starvation; the dwell half is parked |
+| X15 | no (parked) |  |
+| X16 | no (parked) |  |
+| X17 | no (parked) |  |
+| R1 | yes | only the "nothing" output exists |
+| R2 | yes | hook ignores any server reply in slice 1 |
+| R3 | yes | 500 ms bounds only |
+| R4 | no (parked) |  |
+| R5 | no (parked) |  |
+| R6 | no (parked) | replay of a verdict; no verdict exists |
+| R7 | yes |  |
+| J1 | no (parked) | pending OQ22 |
+| J2 | no (parked) | pending OQ22 |
+| J3 | no (parked) | pending OQ22 |
+| J4 | no (parked) | pending OQ22 |
+| J5 | no (parked) | pending OQ22 |
+
+What a forged ingest request or a socket takeover achieves in slice 1: a fake Needs-you entry and a copy of the payloads. It cannot approve or deny anything, because the slice 1 hook is incapable of printing allow or deny (SPEC R69) and no decide path exists. Rating for slice 1: Low (forged request), Medium (takeover).
+
 ## 0. ASSUMPTIONS TO VERIFY
 
 Status as of 2026-10-19, from the official docs (hooks, permissions, settings, sub-agents, headless under `code.claude.com/docs/en/`). VERIFIED = stated in the docs. REFUTED = docs say otherwise. SPIKE Sn = not stated; settled by spike Sn in `docs/v0.2/SPEC.md` section 15, with its pass criterion there.
@@ -135,6 +215,7 @@ Columns: Pre = preconditions. L/S = likelihood / severity. MUST = design require
 | H12 | Node inspector opened by `kill -USR1 <server pid>` on 127.0.0.1:9229; attacker evaluates code in the server and reads grants or calls the compare-and-set | Same-uid process | Full control of the server | M | High (same-uid ceiling applies; cheap to remove) | Start without SIGUSR1 inspector activation, refuse control when `inspector.url()` is set at any admission, doctor checks (SPEC R70) | T-inspector |
 | H13 | Shell wrapper defeats cancel detection: Claude Code kills the shell, Node is orphaned, the socket stays open, the request stays PENDING and Approve reports "sent" to nobody | Terminal answered first, timeout | Ghost request, false "sent" | M | Medium | `exec` node in the command; hook exits when its parent pid changes; heartbeat every 2 s; 6 s silence means ORPHANED; UNVERIFIED until S1 (SPEC R74) | T-orphan |
 | H14 | Second deskmates instance unlinks the first's socket; script upgrade breaks the hash check or leaves old script running | Two terminals, release upgrade | Hooks reach the wrong server, control refused or stuck | M | Medium | Instance lock; second instance passive; upgrade shows script-only diff, known-hash list (SPEC R73, R76) | T-instance-lock, T-upgrade |
+| H15 | Slice 1 only: the read-only Needs-you card pushes raw `tool_input` (commands, file contents, URLs) to the page, so the read token, which used to expose only tool names, now exposes sensitive content; the token can be won by a nonce race (R-E) or obtained by an agent that reads the terminal | Other local user racing the launch nonce, same-uid process, script in page | Disclosure of commands and file contents to a read-only holder | M | High against other local users, Medium against same-uid (who can already read transcripts) | Raw requests only to verified read-token connections as a live push; never in snapshots, `resync`, events, status, logs or audit; dropped at tool end or after 120 s; nonce-only launch URL on `/dev/tty` (SPEC R87, R47, R56) | T-raw-scope |
 
 ### 2.3 Server to browser display
 
@@ -343,6 +424,8 @@ Principle: any deskmates failure degrades to Claude Code's own prompt. It never 
 | R-I | Loopback is cleartext; root or packet capture on the host can read it | Local only | Accept |
 
 ### Do not ship v0.2 (approve and deny) unless
+
+OQ21 (2026-10-19): v0.2 ships slice 1 only, so this list gates the PARKED slice 2 and applies if it is reopened. The slice 1 gate is in `docs/v0.2/SPEC.md` section 13.
 
 1. Section 0 assumptions A1-A8, A15 and A16 are verified from official docs (A1, A7, A15 and the precedence half of A16 are already; the rest are settled by spikes S1-S3, S6, S11; A12 is informational via S12 and is no longer a gate, S6 only decides parser tolerance and install wording) and covered by a contract test against a real installed Claude Code (not mocks). A7 is verified from the docs (deny rules win), so approve no longer waits on it; approve stays disabled until spikes S1, S2, S3 and the S11 contract test pass.
 2. The Tier 1 rebinding harness runs in CI in Chromium and Firefox with a positive control and a mutation check, and the Tier 2 job exists.
