@@ -433,7 +433,7 @@ Never: `onFailure: "block"`, exit 2, non-zero exit, reading config from `cwd`, s
 
 | Scope | Default | Notes |
 |---|---|---|
-| User `~/.claude/settings.json` | Yes (OQ7) | The per-session opt-in happens at runtime, so one install covers all projects. Sessions without opt-in cost one round trip |
+| User `~/.claude/settings.json` | No default; only after an explicit "all projects" confirmation (OQ7 = ask each time, suggest project-local; R14) | One install then covers all projects, but it also reaches every project and every session, so a takeover or bug affects all of them. Sessions without opt-in cost one round trip |
 | Project local `.claude/settings.local.json` | `--scope local` | Untracked by convention; refuse if git tracks it |
 | Project `.claude/settings.json` | Refused unless `--scope project --i-know-this-is-tracked` | A committed absolute path ships to teammates (`TM:I5`) |
 | Managed settings | Never touched | Reported by doctor |

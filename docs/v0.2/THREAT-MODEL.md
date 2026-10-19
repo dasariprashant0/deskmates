@@ -292,7 +292,7 @@ Principle: any deskmates failure degrades to Claude Code's own prompt. It never 
 | Byte-identical uninstall | Edit by minimal text patch (insert and remove whole entries) and record offsets/context in `install.json`; if the file changed since, fall back to a parse-based remove with a diff and consent; test on 20 fixtures |
 | Concurrent edit | Hash and mtime recheck at rename time; abort with no change on mismatch |
 | Foreign hooks | Never reorder, merge or normalize them; list PermissionRequest foreign hooks (I6) |
-| Scope | Default user-global or untracked local file; tracked project file needs an extra flag (I5); managed settings are never touched and are reported if they exist (A7, A16) |
+| Scope | No silent default: the installer asks and suggests the untracked project-local file; user-global only after an explicit "all projects" confirmation (SPEC R14, OQ7); a tracked project file needs an extra flag (I5); managed settings are never touched and are reported if they exist (A7, A16) |
 | Atomicity | Write temp in same directory, fsync, rename; preserve mode and symlinks (edit the target, not replace the link) |
 | Uninstall also | Removes the hook script and runtime files, or leaves them if other scopes still reference them; `doctor` reports leftovers |
 
