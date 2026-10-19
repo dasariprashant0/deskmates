@@ -700,7 +700,9 @@ SECURITY.md and README updated, live attack run repeated under Node, `pnpm insta
 
 ## 14. Open questions for the owner
 
-Nothing here is decided. Each recommendation is mine.
+**Decided by the owner on 2026-10-19** (each as recommended below): OQ1 = (A) server-side correlation, no core change; OQ4 = (a) approve the nonce-authenticated `/api/exchange`; OQ4b = (a) approve the additive WS messages; OQ4c = (a) amend the SECURITY.md non-negotiable (browser-reachable endpoints; the Unix-socket ingest authenticates by location, mode, ingest secret and MAC); OQ7 = (c) ask every time, suggest project-local, user-global only after an explicit "all projects" confirmation (R14); OQ16 = (a) accept the residual risks and record them in an ADR (still to be written, see section 16); OQ17 = Playwright as a dev-only dependency, contained as R65 describes, no property-test library; OQ19 = (a) refuse pairing under tmux, screen or a non-TTY unless `--allow-multiplexer`; OQ20 = (a) per-session opt-in in the page. Not yet written: the SECURITY.md amendment and the ADR for OQ16, both part of slice 0. All other questions below are still recommendations, not decisions.
+
+Nothing else here is decided. Each recommendation is mine.
 
 | # | Question | Options | Recommendation |
 |---|---|---|---|
